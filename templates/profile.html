@@ -21,11 +21,17 @@
                 <div class="stat"><span class="stat-value">{{ posts|length }}</span><span class="stat-label">Posts</span></div>
             </div>
 
-            {% if not is_me %}
+            {% if is_me %}
+            <a href="{{ url_for('edit_profile') }}" class="follow-button">
+                Edit profile
+            </a>
+        {% else %}
             <form method="POST" action="{{ url_for('toggle_follow', user_id=user.id) }}">
-                <button type="submit" class="follow-button">Follow</button>
+                <button type="submit" class="follow-button">
+                    Follow
+                </button>
             </form>
-            {% endif %}
+        {% endif %}
 
             {% if user.bio %}<p class="profile-bio">{{ user.bio }}</p>{% endif %}
 
