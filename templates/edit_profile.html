@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block body %}
+<div class="app">
+    <div class="app-container">
+        <header class="app-header">
+            <a href="{{ url_for('profile') }}" class="header-action">←</a>
+            <span class="app-title">Edit Profile</span>
+            <a href="{{ url_for('logout') }}" class="header-action">⎋</a>
+        </header>
+
+        <main class="feed">
+            {% with messages = get_flashed_messages() %}
+                {% for message in messages %}
+                    <div class="flash">{{ message }}</div>
+                {% endfor %}
+            {% endwith %}
+
+            <section class="post">
+                <h3 style="margin: 0 0 12px; font-size: 15px;">Profile</h3>
+
+                <form method="POST" action="{{ url_for('update_profile') }}">
+                    <div class="field">
+                        <label for="username">Username</label>
+                        <input
+                            id="username"
+                            name="username"
+                            class="input"
+                            type="text"
+                            value="{{ user.username }}"
+                            autocomplete="username"
+                            required
+                        />
+                    </div>
+
+                    <div class="field">
+                        <label for="bio">Bio</label>
+                        <textarea
+                            id="bio"
+                            name="bio"
+                            class="input"
+                            style="height: 96px; padding: 10px 12px; resize: vertical;"
+                            placeholder="Write your bio..."
+                        >{{ user.bio or "" }}</textarea>
+                    </div>
+
+                    <button type="submit" class="primary-button">
+                        Save changes
+                    </button>
+                </form>
+            </section>
+
+            <section class="post danger-card">
+                <h3 style="margin: 0 0 8px; font-size: 15px;">Delete account</h3>
+                <p class="danger-text">
+                    This permanently deletes your account, posts, likes, comments,
+                    and follows.
+                </p>
+
+                <form
+                    method="POST"
+                    action="{{ url_for('delete_account') }}"
+                    onsubmit="return confirm('Are you sure you want to delete your account forever?');"
+                >
+                    <div class="field">
+                        <label for="delete-password">Confirm password</label>
+                        <input
+                            id="delete-password"
+                            name="password"
+                            class="input"
+                            type="password"
+                            placeholder="Enter your password"
+                            autocomplete="current-password"
+                            required
+                        />
+                    </div>
+
+                    <button type="submit" class="danger-button">
+                        Delete account
+                    </button>
+                </form>
+            </section>
+        </main>
+
+        {% include "nav.html" %}
+    </div>
+</div>
+{% endblock %}
