@@ -651,7 +651,210 @@ def search():
         q=q,
     )
 
+# --------------------------------------------------------------------------
+# Profile editing + account deletion
+# --------------------------------------------------------------------------
 
+@app.route("/settings")
+@login_required
+def settings():
+    return redirect(url_for("edit_profile"))
+
+
+@app.route("/profile/edit", methods=["GET"])
+@login_required
+def edit_profile():
+    user = get_profile(session["user_id"])
+
+    if not user:
+        user = {
+            "id": session["user_id"],
+            "username": session.get("username", "unknown"),
+            "bio": "",
+            "verified": False,
+        }
+        ensure_profile(user["id"], user["username"])
+
+    return render_template("edit_profile.html", user=user)
+
+
+@app.route("/profile/update", methods=["POST"])
+@login_required
+def update_profile():
+    user_id = session["user_id"]
+    profile = get_profile(user_id) or {}
+
+    current_username = profile.get("username") or session.get("username", "")
+
+    new_username = normalize_username(request.form.get("username", ""))
+    bio = request.form.get("bio", "").strip()[:160]
+
+    if not new_username:
+        flash("Username is required.")
+        return redirect(url_for("edit_profile"))
+
+    if not USERNAME_RE.match(new_username):
+        flash("Username can only contain letters, numbers, dots, and underscores.")
+        return redirect(url_for("edit_profile"))
+
+    if new_username != current_username and username_exists(new_username):
+        flash("Username is already taken.")
+        return redirect(url_for("edit_profile"))
+
+    auth_updated = False
+    old_email = f"{current_username}{DOMAIN}"
+
+    try:
+        if new_username != current_username:
+            new_email = f"{new_username}{DOMAIN}"
+
+            # Try updating email + metadata.
+            # Some Supabase versions accept email_confirm, some may not.
+            try:
+                db.auth.admin.update_user_by_id(
+                    user_id,
+                    {
+                        "email": new_email,
+                        "email_confirm": True,
+                        "user_metadata": {
+                            "username": new_username,
+                        },
+                    },
+                )
+            except Exception:
+                db.auth.admin.update_user_by_id(
+                    user_id,
+                    {
+                        "email": new_email,
+                        "user_metadata": {
+                            "username": new_username,
+                        },
+                    },
+                )
+
+            auth_updated = True
+
+        db.table("profiles").update(
+            {
+                "username": new_username,
+                "bio": bio,
+            }
+        ).eq("id", user_id).execute()
+
+        session["username"] = new_username
+        flash("Profile updated.")
+
+    except Exception as exc:
+        app.logger.error(f"Profile update failed: {exc}")
+
+        # Try to roll back auth email if username change failed halfway.
+        if auth_updated:
+            try:
+                db.auth.admin.update_user_by_id(
+                    user_id,
+                    {
+                        "email": old_email,
+                        "email_confirm": True,
+                        "user_metadata": {
+                            "username": current_username,
+                        },
+                    },
+                )
+            except Exception:
+                try:
+                    db.auth.admin.update_user_by_id(
+                        user_id,
+                        {
+                            "email": old_email,
+                            "user_metadata": {
+                                "username": current_username,
+                            },
+                        },
+                    )
+                except Exception as rollback_exc:
+                    app.logger.error(f"Email rollback failed: {rollback_exc}")
+
+        flash("Could not update profile.")
+
+    return redirect(url_for("edit_profile"))
+
+
+def delete_user_data(user_id: str):
+    """
+    Deletes user content manually.
+    If your database foreign keys are set to cascade, some of this may already
+    be deleted automatically.
+    """
+    posts_response = (
+        db.table("posts")
+        .select("id")
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    post_ids = [
+        row["id"]
+        for row in posts_response.data or []
+        if row.get("id")
+    ]
+
+    if post_ids:
+        db.table("comments").delete().in_("post_id", post_ids).execute()
+        db.table("likes").delete().in_("post_id", post_ids).execute()
+
+    db.table("comments").delete().eq("user_id", user_id).execute()
+    db.table("likes").delete().eq("user_id", user_id).execute()
+
+    db.table("follows").delete().eq("follower_id", user_id).execute()
+    db.table("follows").delete().eq("following_id", user_id).execute()
+
+    db.table("posts").delete().eq("user_id", user_id).execute()
+    db.table("profiles").delete().eq("id", user_id).execute()
+
+
+@app.route("/account/delete", methods=["POST"])
+@login_required
+def delete_account():
+    user_id = session["user_id"]
+    profile = get_profile(user_id) or {}
+    username = profile.get("username") or session.get("username", "")
+    password = request.form.get("password", "")
+
+    if not password:
+        flash("Password is required to delete your account.")
+        return redirect(url_for("edit_profile"))
+
+    # Verify password before deleting.
+    try:
+        auth_client.auth.sign_in_with_password({
+            "email": f"{username}{DOMAIN}",
+            "password": password,
+        })
+    except Exception as exc:
+        app.logger.error(f"Delete account password check failed: {exc}")
+        flash("Incorrect password. Account was not deleted.")
+        return redirect(url_for("edit_profile"))
+
+    try:
+        # Delete the Supabase auth user first.
+        db.auth.admin.delete_user(user_id)
+    except Exception as exc:
+        app.logger.error(f"Auth user deletion failed: {exc}")
+        flash("Could not delete account. Check server logs.")
+        return redirect(url_for("edit_profile"))
+
+    try:
+        delete_user_data(user_id)
+    except Exception as exc:
+        # Auth user is already deleted, so log cleanup issues.
+        app.logger.error(f"User data cleanup failed: {exc}")
+
+    session.pop("user_id", None)
+    session.pop("username", None)
+
+    flash("Account deleted.")
+    return redirect(url_for("signin"))
+    
 # --------------------------------------------------------------------------
 # Run
 # --------------------------------------------------------------------------
