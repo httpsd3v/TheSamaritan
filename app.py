@@ -258,6 +258,23 @@ def upload_file(file_storage, folder: str) -> str:
         raise ValueError("Media upload failed. Check Supabase Storage bucket.")
 
 
+def delete_media_from_url(media_url: str):
+    if not media_url:
+        return
+
+    if STORAGE_BUCKET not in media_url:
+        return
+
+    try:
+        path = media_url.split(f"/{STORAGE_BUCKET}/", 1)[1]
+        path = path.split("?", 1)[0]
+
+        if path:
+            db.storage.from_(STORAGE_BUCKET).remove([path])
+    except Exception as exc:
+        app.logger.error(f"Media deletion failed: {exc}")
+
+
 def delete_user_data(user_id: str):
     posts_response = (
         db.table("posts")
@@ -686,6 +703,50 @@ def api_toggle_like(post_id):
     except Exception as exc:
         app.logger.error(f"toggle_like failed: {exc}")
         return err("Could not update like.", 500)
+
+
+@app.route("/api/posts/<post_id>/delete", methods=["POST"])
+@login_required_api
+def api_delete_post(post_id):
+    try:
+        response = (
+            db.table("posts")
+            .select("*")
+            .eq("id", post_id)
+            .limit(1)
+            .execute()
+        )
+
+        post = response.data[0] if response.data else None
+    except Exception as exc:
+        app.logger.error(f"delete_post fetch failed: {exc}")
+        return err("Could not load post.", 500)
+
+    if not post:
+        return err("Post not found.", 404)
+
+    current_user_id = session.get("user_id")
+    current_username = session.get("username", "")
+
+    is_author = post.get("user_id") == current_user_id
+    is_admin = is_admin_username(current_username)
+
+    if not is_author and not is_admin:
+        return err("You cannot delete this post.", 403)
+
+    media_url = post.get("image_url") or post.get("media_url") or ""
+
+    try:
+        db.table("comments").delete().eq("post_id", post_id).execute()
+        db.table("likes").delete().eq("post_id", post_id).execute()
+        db.table("posts").delete().eq("id", post_id).execute()
+    except Exception as exc:
+        app.logger.error(f"delete_post failed: {exc}")
+        return err("Could not delete post.", 500)
+
+    delete_media_from_url(media_url)
+
+    return ok()
 
 
 @app.route("/api/posts/<post_id>/comments", methods=["GET", "POST"])
