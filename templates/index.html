@@ -1,0 +1,1211 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Samaritan</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+    <main id="app" class="app"></main>
+    <div id="toast" class="toast"></div>
+
+    <script>
+        const $ = (selector) => document.querySelector(selector);
+
+        const state = {
+            authMode: "signin",
+            me: null,
+            profile: null,
+            isAdmin: false,
+            view: "auth",
+            feed: [],
+            profileData: null,
+        };
+
+        const heartIcon = `
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/>
+            </svg>
+        `;
+
+        const commentIcon = `
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+        `;
+
+        const shareIcon = `
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+                <polyline points="16 6 12 2 8 6"/>
+                <line x1="12" y1="2" x2="12" y2="15"/>
+            </svg>
+        `;
+
+        const imageIcon = `
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <path d="M21 15l-5-5L5 21"/>
+            </svg>
+        `;
+
+        function setApp(html) {
+            $("#app").innerHTML = html;
+        }
+
+        async function api(url, options = {}) {
+            const config = {
+                method: options.method || "GET",
+                headers: {},
+            };
+
+            if (options.json !== undefined) {
+                config.headers["Content-Type"] = "application/json";
+                config.body = JSON.stringify(options.json);
+            } else if (options.body !== undefined) {
+                config.body = options.body;
+            }
+
+            const res = await fetch(url, config);
+
+            let data = {};
+
+            try {
+                data = await res.json();
+            } catch (e) {
+                data = {
+                    ok: false,
+                    error: "Server error.",
+                };
+            }
+
+            if (!res.ok || data.ok === false) {
+                throw new Error(data.error || "Request failed.");
+            }
+
+            return data;
+        }
+
+        function toast(message) {
+            const el = $("#toast");
+            el.textContent = message;
+            el.classList.add("show");
+
+            setTimeout(() => {
+                el.classList.remove("show");
+            }, 2600);
+        }
+
+        function escapeHTML(value) {
+            return String(value ?? "")
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;")
+                .replaceAll("'", "&#39;");
+        }
+
+        function formatContent(text) {
+            let safe = escapeHTML(text);
+
+            safe = safe
+                .replace(/#([a-zA-Z0-9_]+)/g, `<span class="tag">#$1</span>`)
+                .replace(/@([a-zA-Z0-9_.]+)/g, `<span class="tag">@$1</span>`)
+                .replace(/\n/g, "<br>");
+
+            return safe;
+        }
+
+        function timeAgo(iso) {
+            if (!iso) return "";
+
+            const date = new Date(iso);
+
+            if (isNaN(date.getTime())) return "";
+
+            const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+
+            if (seconds < 60) return "now";
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+            if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+            if (seconds < 604800) return `${Math.floor(seconds / 86400)}d`;
+
+            return date.toLocaleDateString();
+        }
+
+        function verifiedHTML(verified) {
+            if (!verified) return "";
+
+            return `<span class="verified" title="Verified">✓</span>`;
+        }
+
+        function avatarHTML(profile, className = "avatar") {
+            if (profile.avatar_url) {
+                return `<img class="${className}" src="${escapeHTML(profile.avatar_url)}" alt="" loading="lazy" />`;
+            }
+
+            const letter = escapeHTML((profile.username || "?").charAt(0).toUpperCase());
+
+            return `<div class="${className} avatar-fallback">${letter}</div>`;
+        }
+
+        function setupTheme() {
+            const saved = localStorage.getItem("samaritan-theme");
+            const theme = saved === "light" ? "light" : "dark";
+            document.documentElement.dataset.theme = theme;
+        }
+
+        function toggleTheme() {
+            const current = document.documentElement.dataset.theme;
+            const next = current === "dark" ? "light" : "dark";
+
+            document.documentElement.dataset.theme = next;
+            localStorage.setItem("samaritan-theme", next);
+
+            toast(`${next === "dark" ? "Dark" : "Light"} mode`);
+        }
+
+        function renderAuth() {
+            state.view = "auth";
+
+            const html = `
+                <div class="auth-wrap">
+                    <div class="auth-card">
+                        <div class="auth-top">
+                            <h1 class="auth-title">The Samaritan</h1>
+                            <button class="header-action" data-action="toggle-theme" title="Toggle theme">◐</button>
+                        </div>
+
+                        <p class="auth-sub">Username and password only.</p>
+
+                        <div class="auth-tabs">
+                            <button
+                                class="auth-tab ${state.authMode === "signin" ? "active" : ""}"
+                                data-action="auth-mode"
+                                data-mode="signin"
+                            >
+                                Sign In
+                            </button>
+
+                            <button
+                                class="auth-tab ${state.authMode === "signup" ? "active" : ""}"
+                                data-action="auth-mode"
+                                data-mode="signup"
+                            >
+                                Sign Up
+                            </button>
+                        </div>
+
+                        <form id="auth-form">
+                            <div class="field">
+                                <label>Username</label>
+                                <input name="username" class="input" autocomplete="username" required />
+                            </div>
+
+                            <div class="field">
+                                <label>Password</label>
+                                <input name="password" type="password" class="input" autocomplete="current-password" required />
+                            </div>
+
+                            <button class="primary-button auth-button">
+                                ${state.authMode === "signup" ? "Create account" : "Sign in"}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            `;
+
+            setApp(html);
+        }
+
+        function setAuthMode(mode) {
+            state.authMode = mode;
+            renderAuth();
+        }
+
+        async function submitAuth(form) {
+            const username = form.username.value.trim();
+            const password = form.password.value;
+
+            try {
+                const data = await api(`/api/${state.authMode}`, {
+                    method: "POST",
+                    json: {
+                        username,
+                        password,
+                    },
+                });
+
+                state.me = data.user;
+                state.profile = data.profile;
+                state.isAdmin = data.is_admin;
+
+                toast(`Welcome @${data.user.username}`);
+
+                showFeed();
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        function bottomNavHTML(active = "home") {
+            const adminButton = state.isAdmin
+                ? `<button class="nav-item ${active === "admin" ? "active" : ""}" data-nav="admin">Verify</button>`
+                : "";
+
+            return `
+                <nav class="bottom-nav">
+                    <button class="nav-item ${active === "home" ? "active" : ""}" data-nav="home">Home</button>
+                    <button class="nav-item ${active === "search" ? "active" : ""}" data-nav="search">Search</button>
+                    <button class="nav-create" data-nav="compose">+</button>
+                    ${adminButton}
+                    <button class="nav-item ${active === "profile" ? "active" : ""}" data-nav="profile">Me</button>
+                </nav>
+            `;
+        }
+
+        function shell(content, active = "home", title = "The Samaritan", backButton = false) {
+            return `
+                <div class="app-container">
+                    <header class="app-header">
+                        <div class="header-left">
+                            ${backButton ? `<button class="header-action" data-action="back">←</button>` : ""}
+                            <span class="app-title">${escapeHTML(title)}</span>
+                        </div>
+
+                        <div class="header-right">
+                            <button class="header-action" data-action="toggle-theme" title="Toggle theme">◐</button>
+                            ${state.me ? `<button class="header-action" data-action="logout" title="Logout">⏻</button>` : ""}
+                        </div>
+                    </header>
+
+                    <main class="main">
+                        ${content}
+                    </main>
+
+                    ${state.me ? bottomNavHTML(active) : ""}
+                </div>
+            `;
+        }
+
+        function composerHTML() {
+            return `
+                <section class="post composer">
+                    <div class="composer-top">
+                        ${avatarHTML(state.profile)}
+                        <textarea id="composer-text" placeholder="What's happening?" maxlength="1000"></textarea>
+                    </div>
+
+                    <div id="composer-preview" class="media-preview"></div>
+
+                    <div class="composer-actions">
+                        <label class="icon-button" title="Add image or GIF">
+                            ${imageIcon}
+                            <input
+                                type="file"
+                                id="composer-media"
+                                accept="image/png,image/jpeg,image/webp,image/gif"
+                                hidden
+                            />
+                        </label>
+
+                        <button class="primary-button" data-action="submit-post">Post</button>
+                    </div>
+                </section>
+            `;
+        }
+
+        async function showFeed() {
+            state.view = "feed";
+
+            const content = `
+                <div class="feed">
+                    ${composerHTML()}
+                    <div id="feed-list">Loading...</div>
+                </div>
+            `;
+
+            setApp(shell(content, "home"));
+
+            await loadFeed();
+        }
+
+        async function loadFeed() {
+            try {
+                const data = await api("/api/feed");
+                state.feed = data.posts;
+
+                const list = $("#feed-list");
+
+                if (!state.feed.length) {
+                    list.innerHTML = `<div class="empty">No posts yet.</div>`;
+                    return;
+                }
+
+                list.innerHTML = state.feed.map(postHTML).join("");
+            } catch (e) {
+                toast(e.message);
+
+                const list = $("#feed-list");
+
+                if (list) {
+                    list.innerHTML = `<div class="empty">Could not load feed.</div>`;
+                }
+            }
+        }
+
+        function postHTML(post) {
+            return `
+                <article class="post" data-post-id="${escapeHTML(post.id)}">
+                    <div class="post-header">
+                        ${avatarHTML(post.author)}
+
+                        <div class="author">
+                            <div class="author-name">
+                                <button class="link" data-open-profile="${escapeHTML(post.author.username)}">
+                                    ${escapeHTML(post.author.username)}
+                                </button>
+                                ${verifiedHTML(post.author.verified)}
+                            </div>
+
+                            <div class="timestamp">${timeAgo(post.created_at)}</div>
+                        </div>
+                    </div>
+
+                    ${post.content ? `<div class="post-content">${formatContent(post.content)}</div>` : ""}
+
+                    ${post.media_url ? `<img class="post-media" src="${escapeHTML(post.media_url)}" alt="" loading="lazy" />` : ""}
+
+                    <div class="post-actions">
+                        <button class="post-action like-button ${post.liked ? "active" : ""}" data-like="${escapeHTML(post.id)}">
+                            ${heartIcon}
+                            <span data-like-count="${escapeHTML(post.id)}">${post.likes}</span>
+                        </button>
+
+                        <button class="post-action" data-toggle-comments="${escapeHTML(post.id)}">
+                            ${commentIcon}
+                            <span data-comment-count="${escapeHTML(post.id)}">${post.comments}</span>
+                        </button>
+
+                        <button class="post-action" data-share="${escapeHTML(post.id)}">
+                            ${shareIcon}
+                        </button>
+                    </div>
+
+                    <div class="comments" id="comments-${escapeHTML(post.id)}" style="display:none">
+                        <div class="comment-list" id="comment-list-${escapeHTML(post.id)}"></div>
+
+                        <form class="comment-form" data-comment-form="${escapeHTML(post.id)}">
+                            <input name="content" placeholder="Reply..." maxlength="500" required />
+                            <button>Reply</button>
+                        </form>
+                    </div>
+                </article>
+            `;
+        }
+
+        async function submitPost() {
+            const textarea = $("#composer-text");
+            const fileInput = $("#composer-media");
+
+            if (!textarea || !fileInput) return;
+
+            const formData = new FormData();
+
+            formData.append("content", textarea.value.trim());
+
+            if (fileInput.files && fileInput.files[0]) {
+                formData.append("media", fileInput.files[0]);
+            }
+
+            try {
+                const data = await api("/api/posts", {
+                    method: "POST",
+                    body: formData,
+                });
+
+                state.feed.unshift(data.post);
+
+                const list = $("#feed-list");
+
+                if (list) {
+                    if (state.feed.length === 1) {
+                        list.innerHTML = "";
+                    }
+
+                    list.insertAdjacentHTML("afterbegin", postHTML(data.post));
+                }
+
+                textarea.value = "";
+                fileInput.value = "";
+
+                const preview = $("#composer-preview");
+
+                if (preview) {
+                    preview.innerHTML = "";
+                }
+
+                toast("Posted");
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        function previewComposerMedia(input) {
+            const preview = $("#composer-preview");
+
+            if (!preview) return;
+
+            if (input.files && input.files[0]) {
+                const url = URL.createObjectURL(input.files[0]);
+
+                preview.innerHTML = `<img src="${url}" alt="" class="preview-media" />`;
+            } else {
+                preview.innerHTML = "";
+            }
+        }
+
+        async function toggleLike(postId) {
+            try {
+                const data = await api(`/api/posts/${postId}/like`, {
+                    method: "POST",
+                });
+
+                const button = document.querySelector(`[data-like="${postId}"]`);
+
+                if (!button) return;
+
+                button.classList.toggle("active", data.liked);
+
+                const count = button.querySelector(`[data-like-count="${postId}"]`);
+
+                if (count) {
+                    count.textContent = data.likes;
+                }
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        async function toggleCommentsBox(postId) {
+            const box = document.getElementById(`comments-${postId}`);
+
+            if (!box) return;
+
+            if (box.style.display === "none") {
+                box.style.display = "block";
+                await loadComments(postId);
+            } else {
+                box.style.display = "none";
+            }
+        }
+
+        async function loadComments(postId) {
+            try {
+                const data = await api(`/api/posts/${postId}/comments`);
+
+                renderComments(postId, data.comments);
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        function renderComments(postId, comments) {
+            const list = document.getElementById(`comment-list-${postId}`);
+
+            if (!list) return;
+
+            const byParent = {};
+
+            comments.forEach((comment) => {
+                const parentId = comment.parent_comment_id || "root";
+
+                if (!byParent[parentId]) {
+                    byParent[parentId] = [];
+                }
+
+                byParent[parentId].push(comment);
+            });
+
+            function renderNodes(nodes, depth = 0) {
+                return nodes.map((comment) => {
+                    const children = byParent[comment.id] || [];
+
+                    return commentHTML(comment, depth) + renderNodes(children, depth + 1);
+                }).join("");
+            }
+
+            const roots = byParent.root || [];
+
+            if (!roots.length) {
+                list.innerHTML = `<div class="empty">No replies yet.</div>`;
+                return;
+            }
+
+            list.innerHTML = renderNodes(roots);
+        }
+
+        function commentHTML(comment, depth) {
+            const indent = Math.min(depth, 3) * 14;
+
+            return `
+                <div class="comment" style="margin-left:${indent}px" data-comment-id="${escapeHTML(comment.id)}">
+                    ${avatarHTML(comment.author, "avatar avatar-sm")}
+
+                    <div class="comment-body">
+                        <div class="author-name">
+                            <button class="link" data-open-profile="${escapeHTML(comment.author.username)}">
+                                ${escapeHTML(comment.author.username)}
+                            </button>
+                            ${verifiedHTML(comment.author.verified)}
+                        </div>
+
+                        <div class="comment-content">${formatContent(comment.content)}</div>
+
+                        <div class="comment-actions">
+                            <button data-reply="${escapeHTML(comment.id)}" data-post="${escapeHTML(comment.post_id)}">Reply</button>
+                        </div>
+
+                        <div class="reply-form-holder" id="reply-form-${escapeHTML(comment.id)}"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function showReplyForm(commentId, postId) {
+            const holder = document.getElementById(`reply-form-${commentId}`);
+
+            if (!holder) return;
+
+            if (holder.innerHTML.trim()) {
+                holder.innerHTML = "";
+                return;
+            }
+
+            holder.innerHTML = `
+                <form class="comment-form" data-reply-form="${escapeHTML(postId)}" data-parent="${escapeHTML(commentId)}">
+                    <input name="content" placeholder="Reply..." maxlength="500" required />
+                    <button>Reply</button>
+                </form>
+            `;
+
+            holder.querySelector("input").focus();
+        }
+
+        async function submitComment(form) {
+            const postId = form.dataset.commentForm || form.dataset.replyForm;
+            const parentId = form.dataset.parent || null;
+
+            const input = form.querySelector(`input[name="content"]`);
+            const content = input.value.trim();
+
+            if (!content) return;
+
+            try {
+                await api(`/api/posts/${postId}/comments`, {
+                    method: "POST",
+                    json: {
+                        content,
+                        parent_id: parentId,
+                    },
+                });
+
+                form.reset();
+
+                await loadComments(postId);
+
+                const count = document.querySelector(`[data-comment-count="${postId}"]`);
+
+                if (count) {
+                    count.textContent = Number(count.textContent || 0) + 1;
+                }
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        async function showProfile(username = null) {
+            const uname = username || state.me.username;
+
+            state.view = "profile";
+
+            const content = `
+                <div class="feed">
+                    <div id="profile-root">Loading...</div>
+                </div>
+            `;
+
+            const isMe = uname === state.me.username;
+
+            setApp(shell(content, isMe ? "profile" : "", `@${uname}`, !isMe));
+
+            try {
+                const data = await api(`/api/profile/${encodeURIComponent(uname)}`);
+
+                state.profileData = data;
+
+                const root = $("#profile-root");
+
+                root.innerHTML = `
+                    ${profileHeaderHTML(data)}
+                    <div class="section-title">Posts</div>
+                    ${
+                        data.posts.length
+                            ? data.posts.map(postHTML).join("")
+                            : `<div class="empty">No posts yet.</div>`
+                    }
+                `;
+            } catch (e) {
+                toast(e.message);
+
+                const root = $("#profile-root");
+
+                if (root) {
+                    root.innerHTML = `<div class="empty">Could not load profile.</div>`;
+                }
+            }
+        }
+
+        function profileHeaderHTML(data) {
+            const profile = data.profile;
+
+            return `
+                <section class="post profile-card">
+                    <div class="profile-top">
+                        ${avatarHTML(profile, "avatar avatar-xl")}
+
+                        <div class="profile-actions">
+                            ${
+                                data.is_me
+                                    ? `<button class="follow-button" data-action="edit-profile">Edit profile</button>`
+                                    : `<button class="follow-button" data-follow="${escapeHTML(profile.id)}" data-following="${data.is_following}">
+                                            ${data.is_following ? "Following" : "Follow"}
+                                       </button>`
+                            }
+                        </div>
+                    </div>
+
+                    <div class="profile-name">
+                        ${escapeHTML(profile.username)}
+                        ${verifiedHTML(profile.verified)}
+                    </div>
+
+                    <div class="profile-handle">@${escapeHTML(profile.username)}</div>
+
+                    ${profile.bio ? `<p class="profile-bio">${formatContent(profile.bio)}</p>` : ""}
+
+                    <div class="profile-stats">
+                        <div class="stat">
+                            <span class="stat-value">${data.followers}</span>
+                            <span class="stat-label">Followers</span>
+                        </div>
+
+                        <div class="stat">
+                            <span class="stat-value">${data.following}</span>
+                            <span class="stat-label">Following</span>
+                        </div>
+
+                        <div class="stat">
+                            <span class="stat-value">${data.posts.length}</span>
+                            <span class="stat-label">Posts</span>
+                        </div>
+                    </div>
+                </section>
+            `;
+        }
+
+        async function toggleFollow(button) {
+            const userId = button.dataset.follow;
+
+            try {
+                const data = await api(`/api/follow/${userId}`, {
+                    method: "POST",
+                });
+
+                button.dataset.following = data.following;
+                button.textContent = data.following ? "Following" : "Follow";
+
+                if (state.profileData && state.profileData.profile.id === userId) {
+                    state.profileData.is_following = data.following;
+                }
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        function showEditProfile() {
+            state.view = "edit-profile";
+
+            const profile = state.profile;
+
+            const content = `
+                <div class="feed">
+                    <form id="profile-form" class="post">
+                        <h3 class="card-title">Edit profile</h3>
+
+                        <div class="profile-edit-avatar">
+                            ${avatarHTML(profile, "avatar avatar-xl")}
+                            <label class="follow-button">
+                                Change photo
+                                <input
+                                    type="file"
+                                    id="avatar-input"
+                                    accept="image/png,image/jpeg,image/webp,image/gif"
+                                    hidden
+                                />
+                            </label>
+                        </div>
+
+                        <div id="avatar-preview" class="media-preview"></div>
+
+                        <div class="field">
+                            <label>Username</label>
+                            <input class="input" name="username" value="${escapeHTML(profile.username)}" required />
+                        </div>
+
+                        <div class="field">
+                            <label>Bio</label>
+                            <textarea class="input" name="bio">${escapeHTML(profile.bio || "")}</textarea>
+                        </div>
+
+                        <button class="primary-button">Save</button>
+                    </form>
+
+                    <form id="delete-form" class="post danger-card">
+                        <h3 class="card-title">Delete account</h3>
+
+                        <div class="field">
+                            <label>Password</label>
+                            <input class="input" type="password" name="password" required />
+                        </div>
+
+                        <button class="danger-button">Delete account</button>
+                    </form>
+                </div>
+            `;
+
+            setApp(shell(content, "profile", "Edit profile", true));
+        }
+
+        function previewAvatar(input) {
+            const preview = $("#avatar-preview");
+
+            if (!preview) return;
+
+            if (input.files && input.files[0]) {
+                const url = URL.createObjectURL(input.files[0]);
+
+                preview.innerHTML = `<img src="${url}" alt="" class="preview-media" />`;
+            } else {
+                preview.innerHTML = "";
+            }
+        }
+
+        async function saveProfile(form) {
+            const formData = new FormData(form);
+
+            const avatarInput = $("#avatar-input");
+
+            if (avatarInput && avatarInput.files && avatarInput.files[0]) {
+                formData.append("avatar", avatarInput.files[0]);
+            }
+
+            try {
+                const data = await api("/api/profile/update", {
+                    method: "POST",
+                    body: formData,
+                });
+
+                state.profile = data.profile;
+                state.me.username = data.user.username;
+
+                toast("Profile saved");
+
+                showProfile(state.me.username);
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        async function deleteAccount(form) {
+            const password = form.password.value;
+
+            if (!confirm("Delete your account forever?")) return;
+
+            try {
+                await api("/api/account/delete", {
+                    method: "POST",
+                    json: {
+                        password,
+                    },
+                });
+
+                state.me = null;
+                state.profile = null;
+                state.isAdmin = false;
+
+                toast("Account deleted");
+
+                renderAuth();
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        function showSearch() {
+            state.view = "search";
+
+            const content = `
+                <div class="search-wrap">
+                    <input id="search-input" class="search-bar" placeholder="Search users" />
+                    <div id="search-results" class="user-list"></div>
+                </div>
+            `;
+
+            setApp(shell(content, "search", "Search"));
+
+            $("#search-input").focus();
+        }
+
+        async function loadSearch(query) {
+            const results = $("#search-results");
+
+            if (!results) return;
+
+            if (!query) {
+                results.innerHTML = "";
+                return;
+            }
+
+            try {
+                const data = await api(`/api/search?q=${encodeURIComponent(query)}`);
+
+                if (!data.users.length) {
+                    results.innerHTML = `<div class="empty">No users found.</div>`;
+                    return;
+                }
+
+                results.innerHTML = data.users.map((user) => userRowHTML(user)).join("");
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        function userRowHTML(user, adminMode = false) {
+            return `
+                <div class="user-row">
+                    <button class="user-row-main" data-open-profile="${escapeHTML(user.username)}">
+                        ${avatarHTML(user)}
+
+                        <div class="author">
+                            <div class="author-name">
+                                ${escapeHTML(user.username)}
+                                ${verifiedHTML(user.verified)}
+                            </div>
+
+                            <div class="timestamp">@${escapeHTML(user.username)}</div>
+                        </div>
+                    </button>
+
+                    ${
+                        adminMode
+                            ? `<button class="follow-button" data-verify="${escapeHTML(user.id)}">
+                                    ${user.verified ? "Unverify" : "Verify"}
+                               </button>`
+                            : ""
+                    }
+                </div>
+            `;
+        }
+
+        function showAdmin() {
+            if (!state.isAdmin) {
+                showFeed();
+                return;
+            }
+
+            state.view = "admin";
+
+            const content = `
+                <div class="search-wrap">
+                    <input id="admin-input" class="search-bar" placeholder="Search users to verify" />
+                    <div id="admin-results" class="user-list"></div>
+                </div>
+            `;
+
+            setApp(shell(content, "admin", "Verify users"));
+
+            loadAdmin("");
+        }
+
+        async function loadAdmin(query) {
+            const results = $("#admin-results");
+
+            if (!results) return;
+
+            try {
+                const url = query
+                    ? `/api/admin/users?q=${encodeURIComponent(query)}`
+                    : `/api/admin/users`;
+
+                const data = await api(url);
+
+                if (!data.users.length) {
+                    results.innerHTML = `<div class="empty">No users found.</div>`;
+                    return;
+                }
+
+                results.innerHTML = data.users.map((user) => userRowHTML(user, true)).join("");
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        async function toggleVerify(userId, button) {
+            try {
+                await api(`/api/admin/verify/${userId}`, {
+                    method: "POST",
+                });
+
+                toast("Verification updated");
+
+                const input = $("#admin-input");
+
+                loadAdmin(input ? input.value.trim() : "");
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        async function logout() {
+            try {
+                await api("/api/logout", {
+                    method: "POST",
+                });
+            } catch (e) {
+                // Ignore logout API errors.
+            }
+
+            state.me = null;
+            state.profile = null;
+            state.isAdmin = false;
+
+            renderAuth();
+        }
+
+        function copyLink(postId) {
+            const url = `${location.origin}/#post-${postId}`;
+
+            navigator.clipboard.writeText(url)
+                .then(() => toast("Link copied"))
+                .catch(() => toast("Could not copy link"));
+        }
+
+        async function handleNav(name) {
+            if (name === "home") {
+                showFeed();
+            } else if (name === "search") {
+                showSearch();
+            } else if (name === "profile") {
+                showProfile(state.me.username);
+            } else if (name === "admin") {
+                showAdmin();
+            } else if (name === "compose") {
+                if (state.view !== "feed") {
+                    await showFeed();
+                }
+
+                setTimeout(() => {
+                    const textarea = $("#composer-text");
+
+                    if (textarea) {
+                        textarea.focus();
+                    }
+                }, 50);
+            }
+        }
+
+        async function init() {
+            setupTheme();
+
+            try {
+                const data = await api("/api/me");
+
+                if (data.authenticated) {
+                    state.me = data.user;
+                    state.profile = data.profile;
+                    state.isAdmin = data.is_admin;
+
+                    showFeed();
+                } else {
+                    renderAuth();
+                }
+            } catch (e) {
+                renderAuth();
+            }
+        }
+
+        document.addEventListener("click", async (event) => {
+            const actionElement = event.target.closest("[data-action]");
+
+            if (actionElement) {
+                const action = actionElement.dataset.action;
+
+                if (action === "toggle-theme") {
+                    toggleTheme();
+                    return;
+                }
+
+                if (action === "logout") {
+                    await logout();
+                    return;
+                }
+
+                if (action === "back") {
+                    showFeed();
+                    return;
+                }
+
+                if (action === "edit-profile") {
+                    showEditProfile();
+                    return;
+                }
+
+                if (action === "submit-post") {
+                    await submitPost();
+                    return;
+                }
+
+                if (action === "auth-mode") {
+                    setAuthMode(actionElement.dataset.mode);
+                    return;
+                }
+            }
+
+            const navElement = event.target.closest("[data-nav]");
+
+            if (navElement) {
+                await handleNav(navElement.dataset.nav);
+                return;
+            }
+
+            const openProfileElement = event.target.closest("[data-open-profile]");
+
+            if (openProfileElement) {
+                showProfile(openProfileElement.dataset.openProfile);
+                return;
+            }
+
+            const likeElement = event.target.closest("[data-like]");
+
+            if (likeElement) {
+                await toggleLike(likeElement.dataset.like);
+                return;
+            }
+
+            const commentsElement = event.target.closest("[data-toggle-comments]");
+
+            if (commentsElement) {
+                await toggleCommentsBox(commentsElement.dataset.toggleComments);
+                return;
+            }
+
+            const shareElement = event.target.closest("[data-share]");
+
+            if (shareElement) {
+                copyLink(shareElement.dataset.share);
+                return;
+            }
+
+            const followElement = event.target.closest("[data-follow]");
+
+            if (followElement) {
+                await toggleFollow(followElement);
+                return;
+            }
+
+            const replyElement = event.target.closest("[data-reply]");
+
+            if (replyElement) {
+                showReplyForm(replyElement.dataset.reply, replyElement.dataset.post);
+                return;
+            }
+
+            const verifyElement = event.target.closest("[data-verify]");
+
+            if (verifyElement) {
+                await toggleVerify(verifyElement.dataset.verify, verifyElement);
+                return;
+            }
+        });
+
+        document.addEventListener("change", (event) => {
+            if (event.target.id === "composer-media") {
+                previewComposerMedia(event.target);
+            }
+
+            if (event.target.id === "avatar-input") {
+                previewAvatar(event.target);
+            }
+        });
+
+        let searchTimer = null;
+
+        document.addEventListener("input", (event) => {
+            if (event.target.id === "search-input") {
+                clearTimeout(searchTimer);
+
+                searchTimer = setTimeout(() => {
+                    loadSearch(event.target.value.trim());
+                }, 250);
+            }
+
+            if (event.target.id === "admin-input") {
+                clearTimeout(searchTimer);
+
+                searchTimer = setTimeout(() => {
+                    loadAdmin(event.target.value.trim());
+                }, 250);
+            }
+        });
+
+        document.addEventListener("submit", async (event) => {
+            const form = event.target;
+
+            if (form.id === "auth-form") {
+                event.preventDefault();
+                await submitAuth(form);
+                return;
+            }
+
+            if (form.dataset.commentForm !== undefined) {
+                event.preventDefault();
+                await submitComment(form);
+                return;
+            }
+
+            if (form.dataset.replyForm !== undefined) {
+                event.preventDefault();
+                await submitComment(form);
+                return;
+            }
+
+            if (form.id === "profile-form") {
+                event.preventDefault();
+                await saveProfile(form);
+                return;
+            }
+
+            if (form.id === "delete-form") {
+                event.preventDefault();
+                await deleteAccount(form);
+                return;
+            }
+        });
+
+        init();
+    </script>
+</body>
+</html>
