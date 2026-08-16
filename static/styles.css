@@ -368,3 +368,39 @@ a { color: inherit; text-decoration: none; }
 @media (min-width: 768px) {
     .app-container { max-width: 680px; }
 }
+
+textarea.input {
+    height: auto;
+    min-height: 96px;
+    padding: 10px 12px;
+    line-height: 1.4;
+}
+
+.danger-card {
+    border-color: #4a1a22;
+}
+
+.danger-text {
+    color: #ffb3bf;
+    font-size: 12px;
+    margin-top: 0;
+    margin-bottom: 14px;
+}
+
+.danger-button {
+    width: 100%;
+    height: 44px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--accent-red);
+    color: white;
+    font-weight: 700;
+}
+
+.danger-button:hover {
+    filter: brightness(1.08);
+}
+
+.danger-button:active {
+    transform: translateY(1px);
+}
