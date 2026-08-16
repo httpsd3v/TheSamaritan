@@ -163,6 +163,16 @@
             );
         }
 
+        function canDeleteComment(comment) {
+            if (!state.me || !comment || !comment.author) return false;
+
+            return Boolean(
+                state.isAdmin ||
+                comment.author.id === state.me.id ||
+                comment.post_author_id === state.me.id
+            );
+        }
+
         function setupTheme() {
             const saved = localStorage.getItem("samaritan-theme");
             const theme = saved === "light" ? "light" : "dark";
@@ -369,6 +379,12 @@
         }
 
         function postHTML(post) {
+            const canReport = Boolean(
+                state.me &&
+                post.author &&
+                post.author.id !== state.me.id
+            );
+
             return `
                 <article class="post" data-post-id="${escapeHTML(post.id)}">
                     <div class="post-header">
@@ -410,6 +426,14 @@
                         <button class="post-action" data-share="${escapeHTML(post.id)}">
                             ${shareIcon}
                         </button>
+
+                        ${
+                            canReport
+                                ? `<button class="post-action" data-report-post="${escapeHTML(post.id)}" title="Report post">
+                                        ⚑
+                                   </button>`
+                                : ""
+                        }
                     </div>
 
                     <div class="comments" id="comments-${escapeHTML(post.id)}" style="display:none">
@@ -550,6 +574,102 @@
             }
         }
 
+        async function deleteComment(commentId, postId) {
+            if (!confirm("Delete this comment?")) return;
+
+            try {
+                await api(`/api/comments/${commentId}/delete`, {
+                    method: "POST",
+                });
+
+                await loadComments(postId);
+
+                toast("Comment deleted");
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        async function reportPost(postId) {
+            const reason = prompt("Why are you reporting this post?");
+
+            if (reason === null) return;
+
+            if (!reason.trim()) {
+                toast("Report reason is required");
+                return;
+            }
+
+            try {
+                await api(`/api/posts/${postId}/report`, {
+                    method: "POST",
+                    json: {
+                        reason: reason.trim(),
+                    },
+                });
+
+                toast("Post reported");
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        async function reportComment(commentId) {
+            const reason = prompt("Why are you reporting this comment?");
+
+            if (reason === null) return;
+
+            if (!reason.trim()) {
+                toast("Report reason is required");
+                return;
+            }
+
+            try {
+                await api(`/api/comments/${commentId}/report`, {
+                    method: "POST",
+                    json: {
+                        reason: reason.trim(),
+                    },
+                });
+
+                toast("Comment reported");
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        async function changePassword(form) {
+            const currentPassword = form.current_password.value;
+            const newPassword = form.new_password.value;
+            const confirmPassword = form.confirm_password.value;
+
+            if (newPassword !== confirmPassword) {
+                toast("New passwords do not match");
+                return;
+            }
+
+            if (newPassword.length < 6) {
+                toast("New password must be at least 6 characters");
+                return;
+            }
+
+            try {
+                await api("/api/account/password", {
+                    method: "POST",
+                    json: {
+                        current_password: currentPassword,
+                        new_password: newPassword,
+                    },
+                });
+
+                form.reset();
+
+                toast("Password changed");
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
         async function toggleCommentsBox(postId) {
             const box = document.getElementById(`comments-${postId}`);
 
@@ -568,6 +688,12 @@
                 const data = await api(`/api/posts/${postId}/comments`);
 
                 renderComments(postId, data.comments);
+
+                const count = document.querySelector(`[data-comment-count="${postId}"]`);
+
+                if (count) {
+                    count.textContent = data.comments.length;
+                }
             } catch (e) {
                 toast(e.message);
             }
@@ -611,6 +737,14 @@
         function commentHTML(comment, depth) {
             const indent = Math.min(depth, 3) * 14;
 
+            const canDelete = canDeleteComment(comment);
+
+            const canReport = Boolean(
+                state.me &&
+                comment.author &&
+                comment.author.id !== state.me.id
+            );
+
             return `
                 <div class="comment" style="margin-left:${indent}px" data-comment-id="${escapeHTML(comment.id)}">
                     ${avatarHTML(comment.author, "avatar avatar-sm")}
@@ -626,7 +760,25 @@
                         <div class="comment-content">${formatContent(comment.content)}</div>
 
                         <div class="comment-actions">
-                            <button data-reply="${escapeHTML(comment.id)}" data-post="${escapeHTML(comment.post_id)}">Reply</button>
+                            <button data-reply="${escapeHTML(comment.id)}" data-post="${escapeHTML(comment.post_id)}">
+                                Reply
+                            </button>
+
+                            ${
+                                canDelete
+                                    ? `<button data-delete-comment="${escapeHTML(comment.id)}" data-post="${escapeHTML(comment.post_id)}">
+                                            Delete
+                                       </button>`
+                                    : ""
+                            }
+
+                            ${
+                                canReport
+                                    ? `<button data-report-comment="${escapeHTML(comment.id)}">
+                                            Report
+                                       </button>`
+                                    : ""
+                            }
                         </div>
 
                         <div class="reply-form-holder" id="reply-form-${escapeHTML(comment.id)}"></div>
@@ -676,12 +828,6 @@
                 form.reset();
 
                 await loadComments(postId);
-
-                const count = document.querySelector(`[data-comment-count="${postId}"]`);
-
-                if (count) {
-                    count.textContent = Number(count.textContent || 0) + 1;
-                }
             } catch (e) {
                 toast(e.message);
             }
@@ -832,6 +978,27 @@
                         </div>
 
                         <button class="primary-button">Save</button>
+                    </form>
+
+                    <form id="password-form" class="post">
+                        <h3 class="card-title">Change password</h3>
+
+                        <div class="field">
+                            <label>Current password</label>
+                            <input class="input" type="password" name="current_password" required />
+                        </div>
+
+                        <div class="field">
+                            <label>New password</label>
+                            <input class="input" type="password" name="new_password" required />
+                        </div>
+
+                        <div class="field">
+                            <label>Confirm new password</label>
+                            <input class="input" type="password" name="confirm_password" required />
+                        </div>
+
+                        <button class="primary-button">Change password</button>
                     </form>
 
                     <form id="delete-form" class="post danger-card">
@@ -1145,6 +1312,30 @@
                 }
             }
 
+            const deleteCommentElement = event.target.closest("[data-delete-comment]");
+
+            if (deleteCommentElement) {
+                await deleteComment(
+                    deleteCommentElement.dataset.deleteComment,
+                    deleteCommentElement.dataset.post
+                );
+                return;
+            }
+
+            const reportPostElement = event.target.closest("[data-report-post]");
+
+            if (reportPostElement) {
+                await reportPost(reportPostElement.dataset.reportPost);
+                return;
+            }
+
+            const reportCommentElement = event.target.closest("[data-report-comment]");
+
+            if (reportCommentElement) {
+                await reportComment(reportCommentElement.dataset.reportComment);
+                return;
+            }
+
             const deleteElement = event.target.closest("[data-delete]");
 
             if (deleteElement) {
@@ -1257,6 +1448,12 @@
             if (form.dataset.replyForm !== undefined) {
                 event.preventDefault();
                 await submitComment(form);
+                return;
+            }
+
+            if (form.id === "password-form") {
+                event.preventDefault();
+                await changePassword(form);
                 return;
             }
 
