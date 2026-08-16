@@ -151,6 +151,18 @@
             return `<div class="${className} avatar-fallback">${letter}</div>`;
         }
 
+        function canDeletePost(post) {
+            return Boolean(
+                state.me &&
+                post &&
+                post.author &&
+                (
+                    state.isAdmin ||
+                    post.author.id === state.me.id
+                )
+            );
+        }
+
         function setupTheme() {
             const saved = localStorage.getItem("samaritan-theme");
             const theme = saved === "light" ? "light" : "dark";
@@ -372,6 +384,12 @@
 
                             <div class="timestamp">${timeAgo(post.created_at)}</div>
                         </div>
+
+                        ${
+                            canDeletePost(post)
+                                ? `<button class="header-action" style="margin-left:auto" data-delete="${escapeHTML(post.id)}" title="Delete post">×</button>`
+                                : ""
+                        }
                     </div>
 
                     ${post.content ? `<div class="post-content">${formatContent(post.content)}</div>` : ""}
@@ -484,6 +502,49 @@
                 if (count) {
                     count.textContent = data.likes;
                 }
+            } catch (e) {
+                toast(e.message);
+            }
+        }
+
+        async function deletePost(postId) {
+            if (!confirm("Delete this post?")) return;
+
+            try {
+                await api(`/api/posts/${postId}/delete`, {
+                    method: "POST",
+                });
+
+                const article = document.querySelector(`[data-post-id="${postId}"]`);
+
+                if (article) {
+                    article.remove();
+                }
+
+                state.feed = state.feed.filter((post) => post.id !== postId);
+
+                if (state.profileData && state.profileData.posts) {
+                    state.profileData.posts = state.profileData.posts.filter((post) => post.id !== postId);
+                }
+
+                if (state.view === "feed" && !state.feed.length) {
+                    const list = $("#feed-list");
+
+                    if (list) {
+                        list.innerHTML = `<div class="empty">No posts yet.</div>`;
+                    }
+                }
+
+                if (
+                    state.view === "profile" &&
+                    state.profileData &&
+                    state.profileData.profile &&
+                    state.profileData.profile.username
+                ) {
+                    await showProfile(state.profileData.profile.username);
+                }
+
+                toast("Post deleted");
             } catch (e) {
                 toast(e.message);
             }
@@ -1082,6 +1143,13 @@
                     setAuthMode(actionElement.dataset.mode);
                     return;
                 }
+            }
+
+            const deleteElement = event.target.closest("[data-delete]");
+
+            if (deleteElement) {
+                await deletePost(deleteElement.dataset.delete);
+                return;
             }
 
             const navElement = event.target.closest("[data-nav]");
