@@ -27,10 +27,6 @@ if os.environ.get("RENDER") == "true":
     app.config["SESSION_COOKIE_SECURE"] = True
 
 
-# --------------------------------------------------------------------------
-# Config
-# --------------------------------------------------------------------------
-
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_KEY")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY")
@@ -49,7 +45,7 @@ ALLOWED_MIME = {
 }
 
 
-def normalize_username(raw: str) -> str:
+def normalize_username(raw):
     return (raw or "").strip().lower()
 
 
@@ -61,27 +57,19 @@ ADMIN_USERNAMES = set(
 
 
 if not SUPABASE_URL or not SUPABASE_ANON_KEY or not SUPABASE_SERVICE_ROLE_KEY:
-    raise RuntimeError(
-        "Missing Supabase environment variables. "
-        "Set SUPABASE_URL and either SUPABASE_KEY, "
-        "or SUPABASE_ANON_KEY + SUPABASE_SERVICE_ROLE_KEY."
-    )
+    raise RuntimeError("Missing Supabase environment variables.")
 
 
-auth_client: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-db: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+auth_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+db = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-
-# --------------------------------------------------------------------------
-# JSON helpers
-# --------------------------------------------------------------------------
 
 def ok(**kwargs):
     kwargs["ok"] = True
     return jsonify(kwargs)
 
 
-def err(message: str, status: int = 400):
+def err(message, status=400):
     return jsonify({
         "ok": False,
         "error": message,
@@ -105,15 +93,11 @@ def require_admin():
     return None
 
 
-def is_admin_username(username: str) -> bool:
+def is_admin_username(username):
     return normalize_username(username) in ADMIN_USERNAMES
 
 
-# --------------------------------------------------------------------------
-# Core helpers
-# --------------------------------------------------------------------------
-
-def authenticate(username: str, password: str):
+def authenticate(username, password):
     email = f"{username}{DOMAIN}"
 
     response = auth_client.auth.sign_in_with_password({
@@ -137,7 +121,7 @@ def authenticate(username: str, password: str):
     return user
 
 
-def ensure_profile(user_id: str, username: str):
+def ensure_profile(user_id, username):
     if not user_id or not username:
         return
 
@@ -153,7 +137,7 @@ def ensure_profile(user_id: str, username: str):
         app.logger.error(f"ensure_profile failed: {exc}")
 
 
-def get_profile(user_id: str):
+def get_profile(user_id):
     try:
         response = (
             db.table("profiles")
@@ -180,7 +164,7 @@ def get_profile(user_id: str):
         return None
 
 
-def username_exists(username: str) -> bool:
+def username_exists(username):
     try:
         response = (
             db.table("profiles")
@@ -195,7 +179,7 @@ def username_exists(username: str) -> bool:
         return False
 
 
-def count_rows(table: str, column: str, value: str) -> int:
+def count_rows(table, column, value):
     try:
         response = (
             db.table(table)
@@ -205,11 +189,11 @@ def count_rows(table: str, column: str, value: str) -> int:
         )
         return response.count or 0
     except Exception as exc:
-        app.logger.error(f"count_rows failed on {table}: {exc}")
+        app.logger.error(f"count_rows failed: {exc}")
         return 0
 
 
-def upload_file(file_storage, folder: str) -> str:
+def upload_file(file_storage, folder):
     if not file_storage:
         return None
 
@@ -258,7 +242,7 @@ def upload_file(file_storage, folder: str) -> str:
         raise ValueError("Media upload failed. Check Supabase Storage bucket.")
 
 
-def delete_media_from_url(media_url: str):
+def delete_media_from_url(media_url):
     if not media_url:
         return
 
@@ -275,7 +259,7 @@ def delete_media_from_url(media_url: str):
         app.logger.error(f"Media deletion failed: {exc}")
 
 
-def delete_user_data(user_id: str):
+def delete_user_data(user_id):
     posts_response = (
         db.table("posts")
         .select("id")
@@ -302,10 +286,6 @@ def delete_user_data(user_id: str):
     db.table("posts").delete().eq("user_id", user_id).execute()
     db.table("profiles").delete().eq("id", user_id).execute()
 
-
-# --------------------------------------------------------------------------
-# Serializers
-# --------------------------------------------------------------------------
 
 def serialize_profile(row):
     row = row or {}
@@ -444,10 +424,6 @@ def hydrate_posts(posts):
     ]
 
 
-# --------------------------------------------------------------------------
-# Auth routes
-# --------------------------------------------------------------------------
-
 @app.route("/api/me")
 def api_me():
     if not session.get("user_id"):
@@ -582,10 +558,6 @@ def api_logout():
 
     return ok()
 
-
-# --------------------------------------------------------------------------
-# Feed / posts
-# --------------------------------------------------------------------------
 
 @app.route("/api/feed")
 @login_required_api
@@ -753,6 +725,22 @@ def api_delete_post(post_id):
 @login_required_api
 def api_comments(post_id):
     if request.method == "GET":
+        post_author_id = None
+
+        try:
+            post_response = (
+                db.table("posts")
+                .select("user_id")
+                .eq("id", post_id)
+                .limit(1)
+                .execute()
+            )
+
+            if post_response.data:
+                post_author_id = post_response.data[0].get("user_id")
+        except Exception as exc:
+            app.logger.error(f"Comment post author fetch failed: {exc}")
+
         try:
             response = (
                 db.table("comments")
@@ -765,10 +753,14 @@ def api_comments(post_id):
 
             comments = response.data or []
 
-            return ok(comments=[
-                serialize_comment(comment)
-                for comment in comments
-            ])
+            serialized_comments = []
+
+            for comment in comments:
+                item = serialize_comment(comment)
+                item["post_author_id"] = post_author_id
+                serialized_comments.append(item)
+
+            return ok(comments=serialized_comments)
         except Exception as exc:
             app.logger.error(f"Comments fetch failed: {exc}")
             return err("Could not load comments.", 500)
@@ -797,15 +789,188 @@ def api_comments(post_id):
 
         comment["profiles"] = get_profile(session["user_id"])
 
-        return ok(comment=serialize_comment(comment))
+        serialized = serialize_comment(comment)
+        serialized["post_author_id"] = session["user_id"]
+
+        return ok(comment=serialized)
     except Exception as exc:
         app.logger.error(f"Comment create failed: {exc}")
         return err("Could not add comment.", 500)
 
 
-# --------------------------------------------------------------------------
-# Profiles
-# --------------------------------------------------------------------------
+@app.route("/api/comments/<comment_id>/delete", methods=["POST"])
+@login_required_api
+def api_delete_comment(comment_id):
+    try:
+        response = (
+            db.table("comments")
+            .select("*")
+            .eq("id", comment_id)
+            .limit(1)
+            .execute()
+        )
+
+        comment = response.data[0] if response.data else None
+    except Exception as exc:
+        app.logger.error(f"Delete comment fetch failed: {exc}")
+        return err("Could not load comment.", 500)
+
+    if not comment:
+        return err("Comment not found.", 404)
+
+    post_author_id = None
+
+    try:
+        post_response = (
+            db.table("posts")
+            .select("user_id")
+            .eq("id", comment.get("post_id"))
+            .limit(1)
+            .execute()
+        )
+
+        if post_response.data:
+            post_author_id = post_response.data[0].get("user_id")
+    except Exception as exc:
+        app.logger.error(f"Delete comment post author fetch failed: {exc}")
+
+    current_user_id = session.get("user_id")
+    current_username = session.get("username", "")
+
+    is_comment_author = comment.get("user_id") == current_user_id
+    is_post_author = post_author_id == current_user_id
+    is_admin = is_admin_username(current_username)
+
+    if not is_comment_author and not is_post_author and not is_admin:
+        return err("You cannot delete this comment.", 403)
+
+    try:
+        db.table("comments").delete().eq("id", comment_id).execute()
+    except Exception as exc:
+        app.logger.error(f"Comment deletion failed: {exc}")
+        return err("Could not delete comment.", 500)
+
+    return ok()
+
+
+@app.route("/api/posts/<post_id>/report", methods=["POST"])
+@login_required_api
+def api_report_post(post_id):
+    data = request.get_json(silent=True) or {}
+
+    reason = (data.get("reason") or "").strip()[:500]
+
+    if not reason:
+        return err("Report reason is required.")
+
+    try:
+        response = (
+            db.table("posts")
+            .select("id")
+            .eq("id", post_id)
+            .limit(1)
+            .execute()
+        )
+
+        if not response.data:
+            return err("Post not found.", 404)
+    except Exception as exc:
+        app.logger.error(f"Report post check failed: {exc}")
+        return err("Could not report post.", 500)
+
+    try:
+        db.table("reports").insert({
+            "reporter_id": session["user_id"],
+            "post_id": post_id,
+            "comment_id": None,
+            "reason": reason,
+            "status": "open",
+        }).execute()
+    except Exception as exc:
+        app.logger.error(f"Post report failed: {exc}")
+        return err("Could not report post.", 500)
+
+    return ok()
+
+
+@app.route("/api/comments/<comment_id>/report", methods=["POST"])
+@login_required_api
+def api_report_comment(comment_id):
+    data = request.get_json(silent=True) or {}
+
+    reason = (data.get("reason") or "").strip()[:500]
+
+    if not reason:
+        return err("Report reason is required.")
+
+    try:
+        response = (
+            db.table("comments")
+            .select("id")
+            .eq("id", comment_id)
+            .limit(1)
+            .execute()
+        )
+
+        if not response.data:
+            return err("Comment not found.", 404)
+    except Exception as exc:
+        app.logger.error(f"Report comment check failed: {exc}")
+        return err("Could not report comment.", 500)
+
+    try:
+        db.table("reports").insert({
+            "reporter_id": session["user_id"],
+            "post_id": None,
+            "comment_id": comment_id,
+            "reason": reason,
+            "status": "open",
+        }).execute()
+    except Exception as exc:
+        app.logger.error(f"Comment report failed: {exc}")
+        return err("Could not report comment.", 500)
+
+    return ok()
+
+
+@app.route("/api/account/password", methods=["POST"])
+@login_required_api
+def api_change_password():
+    data = request.get_json(silent=True) or {}
+
+    current_password = data.get("current_password", "")
+    new_password = data.get("new_password", "")
+
+    if not current_password or not new_password:
+        return err("Current password and new password are required.")
+
+    if len(new_password) < 6:
+        return err("New password must be at least 6 characters.")
+
+    username = session.get("username", "")
+
+    try:
+        auth_client.auth.sign_in_with_password({
+            "email": f"{username}{DOMAIN}",
+            "password": current_password,
+        })
+    except Exception as exc:
+        app.logger.error(f"Password change verification failed: {exc}")
+        return err("Current password is incorrect.", 403)
+
+    try:
+        db.auth.admin.update_user_by_id(
+            session["user_id"],
+            {
+                "password": new_password,
+            },
+        )
+    except Exception as exc:
+        app.logger.error(f"Password update failed: {exc}")
+        return err("Could not change password.", 500)
+
+    return ok()
+
 
 @app.route("/api/profile/<username>")
 @login_required_api
@@ -1052,10 +1217,6 @@ def api_search():
         return err("Search failed.", 500)
 
 
-# --------------------------------------------------------------------------
-# Admin
-# --------------------------------------------------------------------------
-
 @app.route("/api/admin/users")
 @login_required_api
 def api_admin_users():
@@ -1108,10 +1269,6 @@ def api_admin_verify(user_id):
         return err("Could not update verification.", 500)
 
 
-# --------------------------------------------------------------------------
-# Account deletion
-# --------------------------------------------------------------------------
-
 @app.route("/api/account/delete", methods=["POST"])
 @login_required_api
 def api_delete_account():
@@ -1150,10 +1307,6 @@ def api_delete_account():
 
     return ok()
 
-
-# --------------------------------------------------------------------------
-# SPA serving
-# --------------------------------------------------------------------------
 
 @app.route("/favicon.ico")
 def favicon():
