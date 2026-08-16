@@ -1,30 +1,63 @@
 {% extends "base.html" %}
+
 {% block body %}
 <div class="auth-wrap">
     <div class="auth-card">
         <h1 class="auth-title">The Samaritan</h1>
-        <p class="auth-sub">See the truth. Speak it.</p>
+        <p class="auth-sub">Sign in with your username and password.</p>
 
         <div class="auth-tabs">
-            <a href="{{ url_for('signin') }}" class="auth-tab {% if mode=='signin' %}active{% endif %}">Sign In</a>
-            <a href="{{ url_for('signup') }}" class="auth-tab {% if mode=='signup' %}active{% endif %}">Sign Up</a>
+            <a href="{{ url_for('signin') }}"
+               class="auth-tab {% if mode == 'signin' %}active{% endif %}">
+                Sign In
+            </a>
+
+            <a href="{{ url_for('signup') }}"
+               class="auth-tab {% if mode == 'signup' %}active{% endif %}">
+                Sign Up
+            </a>
         </div>
 
         {% with messages = get_flashed_messages() %}
-            {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
+            {% for message in messages %}
+                <div class="flash">{{ message }}</div>
+            {% endfor %}
         {% endwith %}
 
         <form method="POST">
             <div class="field">
                 <label for="username">Username</label>
-                <input id="username" name="username" class="input" placeholder="yourname" autocomplete="username" required />
+                <input
+                    id="username"
+                    name="username"
+                    class="input"
+                    type="text"
+                    placeholder="username"
+                    autocomplete="username"
+                    required
+                    autofocus
+                />
             </div>
+
             <div class="field">
                 <label for="password">Password</label>
-                <input id="password" name="password" class="input" type="password" placeholder="••••••••" autocomplete="current-password" required />
+                <input
+                    id="password"
+                    name="password"
+                    class="input"
+                    type="password"
+                    placeholder="password"
+                    autocomplete="{% if mode == 'signup' %}new-password{% else %}current-password{% endif %}"
+                    required
+                />
             </div>
+
             <button type="submit" class="primary-button">
-                {% if mode == 'signup' %}Create account{% else %}Sign in{% endif %}
+                {% if mode == "signup" %}
+                    Create account
+                {% else %}
+                    Sign in
+                {% endif %}
             </button>
         </form>
     </div>
