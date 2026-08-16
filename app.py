@@ -242,7 +242,6 @@ def signin():
 
     return render_template("auth.html", mode="signin")
 
-
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     if request.method == "POST":
@@ -268,43 +267,33 @@ def signup():
         email = f"{username}{DOMAIN}"
 
         try:
-            response = auth_client.auth.sign_up({
+            # Create the user directly with the service_role key.
+            # email_confirm=True means they can log in immediately.
+            created = db.auth.admin.create_user({
                 "email": email,
                 "password": password,
-                "options": {
-                    "data": {
-                        "username": username,
-                    }
+                "email_confirm": True,
+                "user_metadata": {
+                    "username": username,
                 },
             })
 
-            user = getattr(response, "user", None)
+            # Try to get the new user ID safely.
+            user_id = None
 
-            if not user and getattr(response, "session", None):
-                user = response.session.user
+            if hasattr(created, "user"):
+                user_id = getattr(created.user, "id", None)
+            elif isinstance(created, dict):
+                user_id = created.get("id") or (created.get("user") or {}).get("id")
+            else:
+                user_id = getattr(created, "id", None)
 
-            user_id = getattr(user, "id", None)
-
-            # Create/repair profile row immediately.
             ensure_profile(user_id, username)
 
-            # If Supabase gave us a session already, log them in.
-            if user_id and getattr(response, "session", None):
-                session["user_id"] = user_id
-                session["username"] = username
-                return redirect(url_for("feed"))
+            # Log them in immediately.
+            authenticate(username, password)
 
-            # Otherwise try signing them in manually.
-            try:
-                authenticate(username, password)
-                return redirect(url_for("feed"))
-            except Exception as sign_in_exc:
-                app.logger.error(f"Signup succeeded but sign-in failed: {sign_in_exc}")
-                flash(
-                    "Account created, but automatic sign-in failed. "
-                    "Disable Supabase email confirmation, then sign in."
-                )
-                return redirect(url_for("signin"))
+            return redirect(url_for("feed"))
 
         except Exception as exc:
             message = str(exc).lower()
@@ -319,8 +308,8 @@ def signup():
                 flash("Username is already taken.")
             elif "password" in message:
                 flash("Password must be at least 6 characters.")
-            elif "email" in message:
-                flash("Signup failed because of an auth/email setting. Check Supabase logs.")
+            elif "api key" in message or "invalid" in message:
+                flash("Signup failed. Make sure SUPABASE_SERVICE_ROLE_KEY is set correctly.")
             else:
                 flash("Signup failed. Check server logs for the exact Supabase error.")
 
