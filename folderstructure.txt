@@ -1,0 +1,12 @@
+samaritan/
+├── app.py
+├── requirements.txt
+├── static/
+│   └── styles.css
+└── templates/
+    ├── base.html
+    ├── auth.html
+    ├── feed.html
+    ├── nav.html
+    ├── profile.html
+    └── search.html

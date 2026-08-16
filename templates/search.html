@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="app">
+    <div class="app-container">
+        <header class="app-header">
+            <span class="app-title">Search</span>
+        </header>
+
+        <div class="search-wrap">
+            <form method="GET">
+                <input class="search-bar" type="text" name="q" placeholder="Search users..." value="{{ q }}" autofocus>
+            </form>
+            {% for u in results %}
+            <a href="{{ url_for('user_profile', username=u.username) }}" class="user-row">
+                <img class="avatar" src="https://api.dicebear.com/7.x/initials/svg?seed={{ u.username }}">
+                <div class="author">
+                    <div class="author-name">
+                        {{ u.username }}
+                        {% if u.verified %}<span class="verified">✓</span>{% endif %}
+                    </div>
+                    <span class="timestamp">@{{ u.username }}</span>
+                </div>
+            </a>
+            {% endfor %}
+            {% if q and not results %}<div class="empty">No users found.</div>{% endif %}
+        </div>
+
+        {% include "nav.html" %}
+    </div>
+</div>
+{% endblock %}

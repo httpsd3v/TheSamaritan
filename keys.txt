@@ -1,0 +1,15 @@
+set SUPABASE_URL="https://oihlfwwaackhoxqtjodp.supabase.co"
+set SUPABASE_DB_URL="postgresql://postgres:#networth.dev/admin@db.https://oihlfwwaackhoxqtjodp.supabase.co.supabase.co:5432/postgres"
+set SUPABASE_SERVICE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9paGxmd3dhYWNraG94cXRqb2RwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NjYxODE0NCwiZXhwIjoyMTAyMTk0MTQ0fQ.HZmXBr4TcdHwcmDMGlceB0VHZs2_ykj7Qq3GId5O-_8"     # Settings → API (keep secret!)
+set SUPABASE_JWT_SECRET="ZOa41b9qvloX+5iXDsOKxf2vzR6Sdb27OW5CSMcai601rrGuqUpoW0JIp0C+YwUXztA4XO8hX0X8zN3epJKMjg=="           # Settings → API
+set SECRET_KEY="py8MPSNX0qO0aW1HukBGQBU-tcVZXK8te1BIGuNPtsI"
+pip install flask psycopg2-binary supabase pyjwt
+
+
+
+
+
+git config --global user.email "perpj339@gmail.com"
+git config --global user.name "httpsd3v"
+git commit -m "Initial commit: Spill app"
+git push -u origin main

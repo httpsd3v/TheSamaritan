@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="app">
+    <div class="app-container">
+        <header class="app-header">
+            <span class="app-title">@{{ user.username }}</span>
+            <a href="{{ url_for('logout') }}" class="header-action">⎋</a>
+        </header>
+
+        <section class="profile">
+            <img class="profile-avatar" src="https://api.dicebear.com/7.x/initials/svg?seed={{ user.username }}">
+            <div class="profile-name">
+                {{ user.username }}
+                {% if user.verified %}<span class="verified">✓</span>{% endif %}
+            </div>
+            <div class="profile-handle">@{{ user.username }}</div>
+
+            <div class="profile-stats">
+                <div class="stat"><span class="stat-value">{{ followers }}</span><span class="stat-label">Followers</span></div>
+                <div class="stat"><span class="stat-value">{{ following }}</span><span class="stat-label">Following</span></div>
+                <div class="stat"><span class="stat-value">{{ posts|length }}</span><span class="stat-label">Posts</span></div>
+            </div>
+
+            {% if not is_me %}
+            <form method="POST" action="{{ url_for('toggle_follow', user_id=user.id) }}">
+                <button type="submit" class="follow-button">Follow</button>
+            </form>
+            {% endif %}
+
+            {% if user.bio %}<p class="profile-bio">{{ user.bio }}</p>{% endif %}
+
+            <div class="section-title">Posts</div>
+        </section>
+
+        <main class="feed" style="padding-top:0">
+            {% for p in posts %}
+            <article class="post">
+                <div class="post-content">{{ p.content }}</div>
+                <span class="timestamp">{{ time_ago(p.created_at) }}</span>
+            </article>
+            {% else %}
+            <div class="empty">No posts yet.</div>
+            {% endfor %}
+        </main>
+
+        {% include "nav.html" %}
+    </div>
+</div>
+{% endblock %}

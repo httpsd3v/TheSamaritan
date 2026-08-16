@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="app">
+    <div class="app-container">
+        <header class="app-header">
+            <span class="app-title">The Samaritan</span>
+            <a href="{{ url_for('logout') }}" class="header-action" title="Logout">⎋</a>
+        </header>
+
+        <main class="feed">
+            <form method="POST" action="{{ url_for('create_post') }}" class="create-post">
+                <textarea name="text" placeholder="What's on your mind?" required></textarea>
+                <div class="create-post-actions">
+                    <button type="submit" class="btn-primary">Post</button>
+                </div>
+            </form>
+
+            {% for p in posts %}
+            <article class="post">
+                <div class="post-header">
+                    <img class="avatar" src="https://api.dicebear.com/7.x/initials/svg?seed={{ p.profiles.username }}" alt="">
+                    <div class="author">
+                        <div class="author-name">
+                            <a href="{{ url_for('user_profile', username=p.profiles.username) }}">{{ p.profiles.username }}</a>
+                            {% if p.profiles.verified %}<span class="verified">✓</span>{% endif %}
+                        </div>
+                        <span class="timestamp">{{ time_ago(p.created_at) }}</span>
+                    </div>
+                    <button class="more">•••</button>
+                </div>
+
+                <div class="post-content">{{ p.content }}</div>
+
+                {% if p.image_url %}
+                    <img class="post-media" src="{{ p.image_url }}" alt="">
+                {% endif %}
+
+                <div class="post-actions">
+                    <form method="POST" action="{{ url_for('toggle_like', post_id=p.id) }}" style="display:inline">
+                        <button type="submit" class="post-action like-button {% if p.id in liked_ids %}active{% endif %}">
+                            <svg viewBox="0 0 24 24" fill="{% if p.id in liked_ids %}currentColor{% else %}none{% endif %}" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                            <span>{{ like_counts.get(p.id, 0) }}</span>
+                        </button>
+                    </form>
+                    <button class="post-action comment-button" onclick="document.getElementById('cf-{{ p.id }}').focus()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        <span>{{ p.comment_count }}</span>
+                    </button>
+                    <button class="post-action">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                    </button>
+                </div>
+
+                <form method="POST" action="{{ url_for('add_comment', post_id=p.id) }}" class="comment-form">
+                    <input id="cf-{{ p.id }}" name="text" placeholder="Add a comment..." />
+                    <button type="submit">Post</button>
+                </form>
+            </article>
+            {% else %}
+            <div class="empty">No posts yet. Be the first.</div>
+            {% endfor %}
+        </main>
+
+        {% include "nav.html" %}
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="auth-wrap">
+    <div class="auth-card">
+        <h1 class="auth-title">The Samaritan</h1>
+        <p class="auth-sub">See the truth. Speak it.</p>
+
+        <div class="auth-tabs">
+            <a href="{{ url_for('signin') }}" class="auth-tab {% if mode=='signin' %}active{% endif %}">Sign In</a>
+            <a href="{{ url_for('signup') }}" class="auth-tab {% if mode=='signup' %}active{% endif %}">Sign Up</a>
+        </div>
+
+        {% with messages = get_flashed_messages() %}
+            {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
+        {% endwith %}
+
+        <form method="POST">
+            <div class="field">
+                <label for="username">Username</label>
+                <input id="username" name="username" class="input" placeholder="yourname" autocomplete="username" required />
+            </div>
+            <div class="field">
+                <label for="password">Password</label>
+                <input id="password" name="password" class="input" type="password" placeholder="••••••••" autocomplete="current-password" required />
+            </div>
+            <button type="submit" class="primary-button">
+                {% if mode == 'signup' %}Create account{% else %}Sign in{% endif %}
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}
