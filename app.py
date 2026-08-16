@@ -1,12 +1,10 @@
 import os
 import re
-from datetime import datetime, timezone
+import uuid
 from functools import wraps
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, session, jsonify
 
-# Optional: loads .env locally if you have one.
-# If you don't have python-dotenv installed, this just gets ignored.
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -16,26 +14,51 @@ except Exception:
 from supabase import create_client, Client
 
 app = Flask(__name__)
+
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+)
+
+if os.environ.get("RENDER") == "true":
+    app.config["SESSION_COOKIE_SECURE"] = True
+
 
 # --------------------------------------------------------------------------
-# Supabase config
-#
-# Recommended Render env vars:
-#
-# SUPABASE_URL=https://your-project.supabase.co
-# SUPABASE_ANON_KEY=your-anon-key
-# SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-# SECRET_KEY=random-long-secret
-#
-# If you only want to set one key, set SUPABASE_KEY to the service_role key.
+# Config
 # --------------------------------------------------------------------------
+
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_KEY")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY")
 
 DOMAIN = "@samaritan.app"
 USERNAME_RE = re.compile(r"^[a-z0-9_.]{3,30}$")
+
+STORAGE_BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "media")
+MAX_MEDIA_BYTES = 8 * 1024 * 1024
+
+ALLOWED_MIME = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+}
+
+
+def normalize_username(raw: str) -> str:
+    return (raw or "").strip().lower()
+
+
+ADMIN_USERNAMES = set(
+    normalize_username(x)
+    for x in os.environ.get("ADMIN_USERNAMES", "").split(",")
+    if x.strip()
+)
+
 
 if not SUPABASE_URL or not SUPABASE_ANON_KEY or not SUPABASE_SERVICE_ROLE_KEY:
     raise RuntimeError(
@@ -44,72 +67,53 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY or not SUPABASE_SERVICE_ROLE_KEY:
         "or SUPABASE_ANON_KEY + SUPABASE_SERVICE_ROLE_KEY."
     )
 
-# auth_client is used for sign up / sign in.
-# db is used for database reads/writes.
-#
-# For reliable server-side writes, SUPABASE_SERVICE_ROLE_KEY should be your
-# Supabase service_role key. Do NOT expose that key to the frontend.
+
 auth_client: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 db: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
 # --------------------------------------------------------------------------
-# Helpers
+# JSON helpers
 # --------------------------------------------------------------------------
 
-def normalize_username(raw: str) -> str:
-    return (raw or "").strip().lower()
+def ok(**kwargs):
+    kwargs["ok"] = True
+    return jsonify(kwargs)
 
 
-def parse_timestamp(value):
-    if isinstance(value, datetime):
-        dt = value
-    else:
-        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-
-    return dt
+def err(message: str, status: int = 400):
+    return jsonify({
+        "ok": False,
+        "error": message,
+    }), status
 
 
-def time_ago(value) -> str:
-    try:
-        dt = parse_timestamp(value)
-        now = datetime.now(timezone.utc)
-        diff = int((now - dt).total_seconds())
-
-        if diff < 0:
-            return "just now"
-        if diff < 60:
-            return "just now"
-        if diff < 3600:
-            return f"{diff // 60}m ago"
-        if diff < 86400:
-            return f"{diff // 3600}h ago"
-        if diff < 604800:
-            return f"{diff // 86400}d ago"
-
-        return dt.strftime("%b %d")
-    except Exception:
-        return ""
-
-
-def login_required(f):
+def login_required_api(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not session.get("user_id"):
-            return redirect(url_for("signin"))
+            return err("Not signed in.", 401)
         return f(*args, **kwargs)
 
     return decorated
 
 
+def require_admin():
+    username = normalize_username(session.get("username", ""))
+    if username not in ADMIN_USERNAMES:
+        return err("Forbidden.", 403)
+    return None
+
+
+def is_admin_username(username: str) -> bool:
+    return normalize_username(username) in ADMIN_USERNAMES
+
+
+# --------------------------------------------------------------------------
+# Core helpers
+# --------------------------------------------------------------------------
+
 def authenticate(username: str, password: str):
-    """
-    Signs a user in with fake email:
-    username@samaritan.app
-    """
     email = f"{username}{DOMAIN}"
 
     response = auth_client.auth.sign_in_with_password({
@@ -128,17 +132,12 @@ def authenticate(username: str, password: str):
     session["user_id"] = user.id
     session["username"] = username
 
-    # Make sure their profile row exists.
     ensure_profile(user.id, username)
 
     return user
 
 
 def ensure_profile(user_id: str, username: str):
-    """
-    Creates the profile row if it does not exist.
-    Uses upsert so it will not duplicate.
-    """
     if not user_id or not username:
         return
 
@@ -168,9 +167,12 @@ def get_profile(user_id: str):
             return None
 
         profile = response.data[0]
+
+        profile.setdefault("id", user_id)
         profile.setdefault("username", "unknown")
         profile.setdefault("bio", "")
         profile.setdefault("verified", False)
+        profile.setdefault("avatar_url", "")
 
         return profile
     except Exception as exc:
@@ -203,144 +205,169 @@ def count_rows(table: str, column: str, value: str) -> int:
         )
         return response.count or 0
     except Exception as exc:
-        app.logger.error(f"count_rows failed for {table}: {exc}")
+        app.logger.error(f"count_rows failed on {table}: {exc}")
         return 0
 
 
-# --------------------------------------------------------------------------
-# Routes
-# --------------------------------------------------------------------------
+def upload_file(file_storage, folder: str) -> str:
+    if not file_storage:
+        return None
 
-@app.route("/")
-def index():
-    if session.get("user_id"):
-        return redirect(url_for("feed"))
-    return redirect(url_for("signin"))
+    filename = file_storage.filename or ""
+    mime = file_storage.mimetype or ""
+    ext = ALLOWED_MIME.get(mime)
 
+    if not ext and "." in filename:
+        file_ext = filename.rsplit(".", 1)[-1].lower()
 
-@app.route("/health")
-def health():
-    return "ok", 200
+        if file_ext in ("jpg", "jpeg"):
+            ext = "jpg"
+            mime = "image/jpeg"
+        elif file_ext == "png":
+            ext = "png"
+            mime = "image/png"
+        elif file_ext == "webp":
+            ext = "webp"
+            mime = "image/webp"
+        elif file_ext == "gif":
+            ext = "gif"
+            mime = "image/gif"
 
+    if not ext:
+        raise ValueError("Only PNG, JPG, WEBP, or GIF files are allowed.")
 
-@app.route("/signin", methods=["GET", "POST"])
-def signin():
-    if request.method == "POST":
-        username = normalize_username(request.form.get("username", ""))
-        password = request.form.get("password", "")
+    data = file_storage.read()
 
-        if not username or not password:
-            flash("Username and password are required.")
-            return render_template("auth.html", mode="signin")
+    if len(data) > MAX_MEDIA_BYTES:
+        raise ValueError("File too large. Max 8 MB.")
 
-        try:
-            authenticate(username, password)
-            return redirect(url_for("feed"))
-        except Exception as exc:
-            app.logger.error(f"Signin error: {exc}")
-            flash("Invalid username or password.")
-
-    return render_template("auth.html", mode="signin")
-
-@app.route("/signup", methods=["GET", "POST"])
-def signup():
-    if request.method == "POST":
-        username = normalize_username(request.form.get("username", ""))
-        password = request.form.get("password", "")
-
-        if not username or not password:
-            flash("Username and password are required.")
-            return render_template("auth.html", mode="signup")
-
-        if not USERNAME_RE.match(username):
-            flash("Username can only contain letters, numbers, dots, and underscores.")
-            return render_template("auth.html", mode="signup")
-
-        if len(password) < 6:
-            flash("Password must be at least 6 characters.")
-            return render_template("auth.html", mode="signup")
-
-        if username_exists(username):
-            flash("Username is already taken.")
-            return render_template("auth.html", mode="signup")
-
-        email = f"{username}{DOMAIN}"
-
-        try:
-            # Create the user directly with the service_role key.
-            # email_confirm=True means they can log in immediately.
-            created = db.auth.admin.create_user({
-                "email": email,
-                "password": password,
-                "email_confirm": True,
-                "user_metadata": {
-                    "username": username,
-                },
-            })
-
-            # Try to get the new user ID safely.
-            user_id = None
-
-            if hasattr(created, "user"):
-                user_id = getattr(created.user, "id", None)
-            elif isinstance(created, dict):
-                user_id = created.get("id") or (created.get("user") or {}).get("id")
-            else:
-                user_id = getattr(created, "id", None)
-
-            ensure_profile(user_id, username)
-
-            # Log them in immediately.
-            authenticate(username, password)
-
-            return redirect(url_for("feed"))
-
-        except Exception as exc:
-            message = str(exc).lower()
-            app.logger.error(f"Signup error: {exc}")
-
-            if (
-                "already registered" in message
-                or "already been registered" in message
-                or "already exists" in message
-                or "duplicate" in message
-            ):
-                flash("Username is already taken.")
-            elif "password" in message:
-                flash("Password must be at least 6 characters.")
-            elif "api key" in message or "invalid" in message:
-                flash("Signup failed. Make sure SUPABASE_SERVICE_ROLE_KEY is set correctly.")
-            else:
-                flash("Signup failed. Check server logs for the exact Supabase error.")
-
-    return render_template("auth.html", mode="signup")
-
-
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("signin"))
-
-
-@app.route("/feed")
-@login_required
-def feed():
-    posts = []
+    path = f"{folder}/{uuid.uuid4()}.{ext}"
 
     try:
-        response = (
-            db.table("posts")
-            .select("*, profiles(username, verified)")
-            .order("created_at", desc=True)
-            .limit(50)
-            .execute()
+        db.storage.from_(STORAGE_BUCKET).upload(
+            path,
+            data,
+            {
+                "content-type": mime or f"image/{ext}",
+            },
         )
-        posts = response.data or []
-    except Exception as exc:
-        app.logger.error(f"Feed query failed: {exc}")
-        flash("Could not load feed.")
 
-    post_ids = [post["id"] for post in posts if post.get("id")]
+        return db.storage.from_(STORAGE_BUCKET).get_public_url(path)
+    except Exception as exc:
+        app.logger.error(f"Storage upload failed: {exc}")
+        raise ValueError("Media upload failed. Check Supabase Storage bucket.")
+
+
+def delete_user_data(user_id: str):
+    posts_response = (
+        db.table("posts")
+        .select("id")
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    post_ids = [
+        row["id"]
+        for row in posts_response.data or []
+        if row.get("id")
+    ]
+
+    if post_ids:
+        db.table("comments").delete().in_("post_id", post_ids).execute()
+        db.table("likes").delete().in_("post_id", post_ids).execute()
+
+    db.table("comments").delete().eq("user_id", user_id).execute()
+    db.table("likes").delete().eq("user_id", user_id).execute()
+
+    db.table("follows").delete().eq("follower_id", user_id).execute()
+    db.table("follows").delete().eq("following_id", user_id).execute()
+
+    db.table("posts").delete().eq("user_id", user_id).execute()
+    db.table("profiles").delete().eq("id", user_id).execute()
+
+
+# --------------------------------------------------------------------------
+# Serializers
+# --------------------------------------------------------------------------
+
+def serialize_profile(row):
+    row = row or {}
+
+    return {
+        "id": row.get("id"),
+        "username": row.get("username", "unknown"),
+        "bio": row.get("bio", ""),
+        "verified": bool(row.get("verified", False)),
+        "avatar_url": row.get("avatar_url", ""),
+    }
+
+
+def serialize_post(row, liked_ids=None, like_counts=None, comment_counts=None):
+    liked_ids = liked_ids or set()
+    like_counts = like_counts or {}
+    comment_counts = comment_counts or {}
+
+    post_id = row.get("id")
+
+    profile = row.get("profiles")
+
+    if isinstance(profile, list):
+        profile = profile[0] if profile else None
+
+    if profile:
+        author = serialize_profile(profile)
+    else:
+        author = {
+            "id": None,
+            "username": "deleted",
+            "verified": False,
+            "avatar_url": "",
+        }
+
+    return {
+        "id": post_id,
+        "content": row.get("content", ""),
+        "media_url": row.get("image_url") or row.get("media_url") or "",
+        "created_at": row.get("created_at"),
+        "author": author,
+        "likes": like_counts.get(post_id, 0),
+        "liked": post_id in liked_ids,
+        "comments": comment_counts.get(post_id, 0),
+    }
+
+
+def serialize_comment(row):
+    profile = row.get("profiles")
+
+    if isinstance(profile, list):
+        profile = profile[0] if profile else None
+
+    if profile:
+        author = serialize_profile(profile)
+    else:
+        author = {
+            "id": None,
+            "username": "deleted",
+            "verified": False,
+            "avatar_url": "",
+        }
+
+    return {
+        "id": row.get("id"),
+        "post_id": row.get("post_id"),
+        "parent_comment_id": row.get("parent_comment_id"),
+        "content": row.get("content", ""),
+        "created_at": row.get("created_at"),
+        "author": author,
+    }
+
+
+def hydrate_posts(posts):
+    post_ids = [
+        post.get("id")
+        for post in posts
+        if post.get("id")
+    ]
 
     like_counts = {post_id: 0 for post_id in post_ids}
     comment_counts = {post_id: 0 for post_id in post_ids}
@@ -381,7 +408,7 @@ def feed():
             my_likes_response = (
                 db.table("likes")
                 .select("post_id")
-                .eq("user_id", session["user_id"])
+                .eq("user_id", session.get("user_id"))
                 .in_("post_id", post_ids)
                 .execute()
             )
@@ -394,62 +421,241 @@ def feed():
         except Exception as exc:
             app.logger.error(f"Current user likes failed: {exc}")
 
-    # Normalize embedded profile data so templates do not crash.
-    for post in posts:
-        profile = post.get("profiles")
+    return [
+        serialize_post(post, liked_ids, like_counts, comment_counts)
+        for post in posts
+    ]
 
-        # Sometimes embedded relationships can come back as a list.
-        if isinstance(profile, list):
-            profile = profile[0] if profile else None
 
-        if not profile:
-            profile = {
-                "username": "deleted",
-                "verified": False,
-            }
+# --------------------------------------------------------------------------
+# Auth routes
+# --------------------------------------------------------------------------
 
-        profile.setdefault("username", "deleted")
-        profile.setdefault("verified", False)
+@app.route("/api/me")
+def api_me():
+    if not session.get("user_id"):
+        return ok(authenticated=False)
 
-        post["profiles"] = profile
-        post["like_count"] = like_counts.get(post.get("id"), 0)
-        post["comment_count"] = comment_counts.get(post.get("id"), 0)
+    profile = get_profile(session["user_id"])
 
-    return render_template(
-        "feed.html",
-        posts=posts,
-        liked_ids=liked_ids,
-        like_counts=like_counts,
-        time_ago=time_ago,
+    if not profile:
+        profile = {
+            "id": session["user_id"],
+            "username": session.get("username", "unknown"),
+            "bio": "",
+            "verified": False,
+            "avatar_url": "",
+        }
+
+        ensure_profile(profile["id"], profile["username"])
+
+    return ok(
+        authenticated=True,
+        user={
+            "id": session["user_id"],
+            "username": profile.get("username"),
+        },
+        profile=serialize_profile(profile),
+        is_admin=is_admin_username(profile.get("username", "")),
     )
 
 
-@app.route("/post", methods=["POST"])
-@login_required
-def create_post():
-    text = request.form.get("text", "").strip()
-    image_url = request.form.get("image_url", "").strip() or None
+@app.route("/api/signin", methods=["POST"])
+def api_signin():
+    data = request.get_json(silent=True) or {}
 
-    if not text:
-        flash("Post cannot be empty.")
-        return redirect(url_for("feed"))
+    username = normalize_username(data.get("username", ""))
+    password = data.get("password", "")
+
+    if not username or not password:
+        return err("Username and password are required.")
 
     try:
-        db.table("posts").insert({
-            "user_id": session["user_id"],
-            "content": text,
-            "image_url": image_url,
-        }).execute()
+        authenticate(username, password)
+    except Exception as exc:
+        app.logger.error(f"Signin error: {exc}")
+        return err("Invalid username or password.", 401)
+
+    profile = get_profile(session["user_id"])
+
+    return ok(
+        user={
+            "id": session["user_id"],
+            "username": username,
+        },
+        profile=serialize_profile(profile),
+        is_admin=is_admin_username(username),
+    )
+
+
+@app.route("/api/signup", methods=["POST"])
+def api_signup():
+    data = request.get_json(silent=True) or {}
+
+    username = normalize_username(data.get("username", ""))
+    password = data.get("password", "")
+
+    if not username or not password:
+        return err("Username and password are required.")
+
+    if not USERNAME_RE.match(username):
+        return err("Username can only contain letters, numbers, dots, and underscores.")
+
+    if len(password) < 6:
+        return err("Password must be at least 6 characters.")
+
+    if username_exists(username):
+        return err("Username is already taken.")
+
+    email = f"{username}{DOMAIN}"
+
+    try:
+        created = db.auth.admin.create_user({
+            "email": email,
+            "password": password,
+            "email_confirm": True,
+            "user_metadata": {
+                "username": username,
+            },
+        })
+
+        user = getattr(created, "user", created)
+        user_id = getattr(user, "id", None)
+
+        ensure_profile(user_id, username)
+
+        authenticate(username, password)
+
+        profile = get_profile(user_id)
+
+        return ok(
+            user={
+                "id": user_id,
+                "username": username,
+            },
+            profile=serialize_profile(profile),
+            is_admin=is_admin_username(username),
+        )
+
+    except Exception as exc:
+        message = str(exc).lower()
+        app.logger.error(f"Signup error: {exc}")
+
+        if (
+            "already registered" in message
+            or "already been registered" in message
+            or "already exists" in message
+            or "duplicate" in message
+        ):
+            return err("Username is already taken.")
+
+        if "password" in message:
+            return err("Password must be at least 6 characters.")
+
+        if "api key" in message or "invalid" in message:
+            return err("Signup failed. Set SUPABASE_SERVICE_ROLE_KEY correctly.")
+
+        return err("Signup failed. Check server logs.")
+
+
+@app.route("/api/logout", methods=["POST"])
+def api_logout():
+    session.pop("user_id", None)
+    session.pop("username", None)
+
+    return ok()
+
+
+# --------------------------------------------------------------------------
+# Feed / posts
+# --------------------------------------------------------------------------
+
+@app.route("/api/feed")
+@login_required_api
+def api_feed():
+    try:
+        limit = int(request.args.get("limit", 30))
+        limit = max(1, min(limit, 50))
+    except Exception:
+        limit = 30
+
+    try:
+        response = (
+            db.table("posts")
+            .select("*, profiles(*)")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        posts = response.data or []
+        return ok(posts=hydrate_posts(posts))
+    except Exception as exc:
+        app.logger.error(f"Feed query failed: {exc}")
+        return err("Could not load feed.", 500)
+
+
+@app.route("/api/posts", methods=["POST"])
+@login_required_api
+def api_create_post():
+    content = (request.form.get("content") or "").strip()[:1000]
+    media_file = request.files.get("media")
+
+    media_url = None
+
+    if media_file and media_file.filename:
+        try:
+            media_url = upload_file(media_file, "posts")
+        except ValueError as exc:
+            return err(str(exc))
+
+    if not content and not media_url:
+        return err("Post cannot be empty.")
+
+    payload = {
+        "user_id": session["user_id"],
+        "content": content,
+        "image_url": media_url,
+    }
+
+    try:
+        inserted = db.table("posts").insert(payload).execute()
+        post = inserted.data[0] if inserted.data else None
+
+        if not post:
+            latest = (
+                db.table("posts")
+                .select("*")
+                .eq("user_id", session["user_id"])
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+                .data
+            )
+
+            post = latest[0] if latest else None
+
+        if not post:
+            return err("Could not create post.", 500)
+
+        post["profiles"] = get_profile(session["user_id"])
+
+        serialized = serialize_post(
+            post,
+            liked_ids=set(),
+            like_counts={post.get("id"): 0},
+            comment_counts={post.get("id"): 0},
+        )
+
+        return ok(post=serialized)
     except Exception as exc:
         app.logger.error(f"create_post failed: {exc}")
-        flash("Could not create post.")
-
-    return redirect(url_for("feed"))
+        return err("Could not create post.", 500)
 
 
-@app.route("/like/<post_id>", methods=["POST"])
-@login_required
-def toggle_like(post_id):
+@app.route("/api/posts/<post_id>/like", methods=["POST"])
+@login_required_api
+def api_toggle_like(post_id):
     try:
         existing = (
             db.table("likes")
@@ -463,85 +669,86 @@ def toggle_like(post_id):
         if existing.data:
             like_id = existing.data[0]["id"]
             db.table("likes").delete().eq("id", like_id).execute()
+            liked = False
         else:
             db.table("likes").insert({
                 "user_id": session["user_id"],
                 "post_id": post_id,
             }).execute()
+            liked = True
+
+        likes = count_rows("likes", "post_id", post_id)
+
+        return ok(
+            liked=liked,
+            likes=likes,
+        )
     except Exception as exc:
         app.logger.error(f"toggle_like failed: {exc}")
-        flash("Could not update like.")
-
-    return redirect(request.referrer or url_for("feed"))
+        return err("Could not update like.", 500)
 
 
-@app.route("/comment/<post_id>", methods=["POST"])
-@login_required
-def add_comment(post_id):
-    text = request.form.get("text", "").strip()
+@app.route("/api/posts/<post_id>/comments", methods=["GET", "POST"])
+@login_required_api
+def api_comments(post_id):
+    if request.method == "GET":
+        try:
+            response = (
+                db.table("comments")
+                .select("*, profiles(*)")
+                .eq("post_id", post_id)
+                .order("created_at", desc=False)
+                .limit(200)
+                .execute()
+            )
 
-    if not text:
-        return redirect(request.referrer or url_for("feed"))
+            comments = response.data or []
+
+            return ok(comments=[
+                serialize_comment(comment)
+                for comment in comments
+            ])
+        except Exception as exc:
+            app.logger.error(f"Comments fetch failed: {exc}")
+            return err("Could not load comments.", 500)
+
+    data = request.get_json(silent=True) or {}
+
+    content = (data.get("content") or "").strip()[:500]
+    parent_id = data.get("parent_id") or None
+
+    if not content:
+        return err("Comment cannot be empty.")
+
+    payload = {
+        "user_id": session["user_id"],
+        "post_id": post_id,
+        "content": content,
+        "parent_comment_id": parent_id,
+    }
 
     try:
-        db.table("comments").insert({
-            "user_id": session["user_id"],
-            "post_id": post_id,
-            "content": text,
-        }).execute()
+        inserted = db.table("comments").insert(payload).execute()
+        comment = inserted.data[0] if inserted.data else None
+
+        if not comment:
+            return err("Could not add comment.", 500)
+
+        comment["profiles"] = get_profile(session["user_id"])
+
+        return ok(comment=serialize_comment(comment))
     except Exception as exc:
-        app.logger.error(f"add_comment failed: {exc}")
-        flash("Could not add comment.")
-
-    return redirect(request.referrer or url_for("feed"))
+        app.logger.error(f"Comment create failed: {exc}")
+        return err("Could not add comment.", 500)
 
 
-@app.route("/profile")
-@login_required
-def profile():
-    user = get_profile(session["user_id"])
+# --------------------------------------------------------------------------
+# Profiles
+# --------------------------------------------------------------------------
 
-    if not user:
-        user = {
-            "id": session["user_id"],
-            "username": session.get("username", "unknown"),
-            "bio": "",
-            "verified": False,
-        }
-        ensure_profile(user["id"], user["username"])
-
-    posts = []
-
-    try:
-        response = (
-            db.table("posts")
-            .select("*")
-            .eq("user_id", session["user_id"])
-            .order("created_at", desc=True)
-            .limit(50)
-            .execute()
-        )
-        posts = response.data or []
-    except Exception as exc:
-        app.logger.error(f"Profile posts query failed: {exc}")
-
-    followers = count_rows("follows", "following_id", user["id"])
-    following = count_rows("follows", "follower_id", user["id"])
-
-    return render_template(
-        "profile.html",
-        user=user,
-        posts=posts,
-        followers=followers,
-        following=following,
-        time_ago=time_ago,
-        is_me=True,
-    )
-
-
-@app.route("/user/<username>")
-@login_required
-def user_profile(username):
+@app.route("/api/profile/<username>")
+@login_required_api
+def api_profile(username):
     username = normalize_username(username)
 
     try:
@@ -552,154 +759,88 @@ def user_profile(username):
             .limit(1)
             .execute()
         )
-        user = response.data[0] if response.data else None
+
+        profile = response.data[0] if response.data else None
     except Exception as exc:
-        app.logger.error(f"user_profile query failed: {exc}")
-        user = None
+        app.logger.error(f"profile fetch failed: {exc}")
+        return err("Could not load profile.", 500)
 
-    if not user:
-        return "User not found", 404
+    if not profile:
+        return err("User not found.", 404)
 
-    user.setdefault("username", username)
-    user.setdefault("bio", "")
-    user.setdefault("verified", False)
+    profile.setdefault("bio", "")
+    profile.setdefault("verified", False)
+    profile.setdefault("avatar_url", "")
 
     posts = []
 
     try:
-        response = (
+        posts_response = (
             db.table("posts")
-            .select("*")
-            .eq("user_id", user["id"])
+            .select("*, profiles(*)")
+            .eq("user_id", profile["id"])
             .order("created_at", desc=True)
             .limit(50)
             .execute()
         )
-        posts = response.data or []
+
+        posts = posts_response.data or []
     except Exception as exc:
-        app.logger.error(f"User posts query failed: {exc}")
+        app.logger.error(f"profile posts fetch failed: {exc}")
 
-    followers = count_rows("follows", "following_id", user["id"])
-    following = count_rows("follows", "follower_id", user["id"])
+    followers = count_rows("follows", "following_id", profile["id"])
+    following = count_rows("follows", "follower_id", profile["id"])
 
-    is_me = user.get("id") == session.get("user_id")
+    is_me = profile["id"] == session.get("user_id")
 
-    return render_template(
-        "profile.html",
-        user=user,
-        posts=posts,
-        followers=followers,
-        following=following,
-        time_ago=time_ago,
-        is_me=is_me,
-    )
+    is_following = False
 
-
-@app.route("/follow/<user_id>", methods=["POST"])
-@login_required
-def toggle_follow(user_id):
-    if user_id == session.get("user_id"):
-        return redirect(request.referrer or url_for("feed"))
-
-    try:
-        existing = (
-            db.table("follows")
-            .select("id")
-            .eq("follower_id", session["user_id"])
-            .eq("following_id", user_id)
-            .limit(1)
-            .execute()
-        )
-
-        if existing.data:
-            follow_id = existing.data[0]["id"]
-            db.table("follows").delete().eq("id", follow_id).execute()
-        else:
-            db.table("follows").insert({
-                "follower_id": session["user_id"],
-                "following_id": user_id,
-            }).execute()
-    except Exception as exc:
-        app.logger.error(f"toggle_follow failed: {exc}")
-        flash("Could not update follow.")
-
-    return redirect(request.referrer or url_for("feed"))
-
-
-@app.route("/search")
-@login_required
-def search():
-    q = request.args.get("q", "").strip()
-    results = []
-
-    if q:
+    if not is_me:
         try:
-            response = (
-                db.table("profiles")
-                .select("*")
-                .ilike("username", f"%{q}%")
-                .limit(20)
+            follow_response = (
+                db.table("follows")
+                .select("id")
+                .eq("follower_id", session["user_id"])
+                .eq("following_id", profile["id"])
+                .limit(1)
                 .execute()
             )
-            results = response.data or []
-        except Exception as exc:
-            app.logger.error(f"Search failed: {exc}")
 
-    return render_template(
-        "search.html",
-        results=results,
-        q=q,
+            is_following = bool(follow_response.data)
+        except Exception as exc:
+            app.logger.error(f"follow check failed: {exc}")
+
+    return ok(
+        profile=serialize_profile(profile),
+        posts=hydrate_posts(posts),
+        followers=followers,
+        following=following,
+        is_me=is_me,
+        is_following=is_following,
     )
 
-# --------------------------------------------------------------------------
-# Profile editing + account deletion
-# --------------------------------------------------------------------------
 
-@app.route("/settings")
-@login_required
-def settings():
-    return redirect(url_for("edit_profile"))
-
-
-@app.route("/profile/edit", methods=["GET"])
-@login_required
-def edit_profile():
-    user = get_profile(session["user_id"])
-
-    if not user:
-        user = {
-            "id": session["user_id"],
-            "username": session.get("username", "unknown"),
-            "bio": "",
-            "verified": False,
-        }
-        ensure_profile(user["id"], user["username"])
-
-    return render_template("edit_profile.html", user=user)
-
-
-@app.route("/profile/update", methods=["POST"])
-@login_required
-def update_profile():
+@app.route("/api/profile/update", methods=["POST"])
+@login_required_api
+def api_update_profile():
     user_id = session["user_id"]
     profile = get_profile(user_id) or {}
 
     current_username = profile.get("username") or session.get("username", "")
 
     new_username = normalize_username(request.form.get("username", ""))
-    bio = request.form.get("bio", "").strip()[:160]
+    bio = (request.form.get("bio") or "").strip()[:160]
+
+    avatar_file = request.files.get("avatar")
 
     if not new_username:
-        flash("Username is required.")
-        return redirect(url_for("edit_profile"))
+        return err("Username is required.")
 
     if not USERNAME_RE.match(new_username):
-        flash("Username can only contain letters, numbers, dots, and underscores.")
-        return redirect(url_for("edit_profile"))
+        return err("Username can only contain letters, numbers, dots, and underscores.")
 
     if new_username != current_username and username_exists(new_username):
-        flash("Username is already taken.")
-        return redirect(url_for("edit_profile"))
+        return err("Username is already taken.")
 
     auth_updated = False
     old_email = f"{current_username}{DOMAIN}"
@@ -708,8 +849,6 @@ def update_profile():
         if new_username != current_username:
             new_email = f"{new_username}{DOMAIN}"
 
-            # Try updating email + metadata.
-            # Some Supabase versions accept email_confirm, some may not.
             try:
                 db.auth.admin.update_user_by_id(
                     user_id,
@@ -734,20 +873,34 @@ def update_profile():
 
             auth_updated = True
 
-        db.table("profiles").update(
-            {
-                "username": new_username,
-                "bio": bio,
-            }
-        ).eq("id", user_id).execute()
+        payload = {
+            "username": new_username,
+            "bio": bio,
+        }
+
+        if avatar_file and avatar_file.filename:
+            payload["avatar_url"] = upload_file(avatar_file, "avatars")
+
+        db.table("profiles").update(payload).eq("id", user_id).execute()
 
         session["username"] = new_username
-        flash("Profile updated.")
+
+        updated_profile = get_profile(user_id)
+
+        return ok(
+            user={
+                "id": user_id,
+                "username": new_username,
+            },
+            profile=serialize_profile(updated_profile),
+        )
+
+    except ValueError as exc:
+        return err(str(exc))
 
     except Exception as exc:
         app.logger.error(f"Profile update failed: {exc}")
 
-        # Try to roll back auth email if username change failed halfway.
         if auth_updated:
             try:
                 db.auth.admin.update_user_by_id(
@@ -774,57 +927,143 @@ def update_profile():
                 except Exception as rollback_exc:
                     app.logger.error(f"Email rollback failed: {rollback_exc}")
 
-        flash("Could not update profile.")
-
-    return redirect(url_for("edit_profile"))
+        return err("Could not update profile.", 500)
 
 
-def delete_user_data(user_id: str):
-    """
-    Deletes user content manually.
-    If your database foreign keys are set to cascade, some of this may already
-    be deleted automatically.
-    """
-    posts_response = (
-        db.table("posts")
-        .select("id")
-        .eq("user_id", user_id)
-        .execute()
-    )
+@app.route("/api/follow/<user_id>", methods=["POST"])
+@login_required_api
+def api_toggle_follow(user_id):
+    if user_id == session.get("user_id"):
+        return err("You cannot follow yourself.")
 
-    post_ids = [
-        row["id"]
-        for row in posts_response.data or []
-        if row.get("id")
-    ]
+    try:
+        existing = (
+            db.table("follows")
+            .select("id")
+            .eq("follower_id", session["user_id"])
+            .eq("following_id", user_id)
+            .limit(1)
+            .execute()
+        )
 
-    if post_ids:
-        db.table("comments").delete().in_("post_id", post_ids).execute()
-        db.table("likes").delete().in_("post_id", post_ids).execute()
+        if existing.data:
+            follow_id = existing.data[0]["id"]
+            db.table("follows").delete().eq("id", follow_id).execute()
+            following = False
+        else:
+            db.table("follows").insert({
+                "follower_id": session["user_id"],
+                "following_id": user_id,
+            }).execute()
+            following = True
 
-    db.table("comments").delete().eq("user_id", user_id).execute()
-    db.table("likes").delete().eq("user_id", user_id).execute()
-
-    db.table("follows").delete().eq("follower_id", user_id).execute()
-    db.table("follows").delete().eq("following_id", user_id).execute()
-
-    db.table("posts").delete().eq("user_id", user_id).execute()
-    db.table("profiles").delete().eq("id", user_id).execute()
+        return ok(following=following)
+    except Exception as exc:
+        app.logger.error(f"toggle_follow failed: {exc}")
+        return err("Could not update follow.", 500)
 
 
-@app.route("/account/delete", methods=["POST"])
-@login_required
-def delete_account():
+@app.route("/api/search")
+@login_required_api
+def api_search():
+    q = request.args.get("q", "").strip()
+
+    if not q:
+        return ok(users=[])
+
+    try:
+        response = (
+            db.table("profiles")
+            .select("*")
+            .ilike("username", f"%{q}%")
+            .limit(20)
+            .execute()
+        )
+
+        users = response.data or []
+
+        return ok(users=[
+            serialize_profile(user)
+            for user in users
+        ])
+    except Exception as exc:
+        app.logger.error(f"Search failed: {exc}")
+        return err("Search failed.", 500)
+
+
+# --------------------------------------------------------------------------
+# Admin
+# --------------------------------------------------------------------------
+
+@app.route("/api/admin/users")
+@login_required_api
+def api_admin_users():
+    admin_error = require_admin()
+    if admin_error:
+        return admin_error
+
+    q = request.args.get("q", "").strip()
+
+    try:
+        query = db.table("profiles").select("*").limit(50)
+
+        if q:
+            query = query.ilike("username", f"%{q}%")
+
+        response = query.order("username").execute()
+        users = response.data or []
+
+        return ok(users=[
+            serialize_profile(user)
+            for user in users
+        ])
+    except Exception as exc:
+        app.logger.error(f"Admin users failed: {exc}")
+        return err("Could not load users.", 500)
+
+
+@app.route("/api/admin/verify/<user_id>", methods=["POST"])
+@login_required_api
+def api_admin_verify(user_id):
+    admin_error = require_admin()
+    if admin_error:
+        return admin_error
+
+    target = get_profile(user_id)
+
+    if not target:
+        return err("User not found.", 404)
+
+    new_verified = not bool(target.get("verified", False))
+
+    try:
+        db.table("profiles").update({
+            "verified": new_verified,
+        }).eq("id", user_id).execute()
+
+        return ok(verified=new_verified)
+    except Exception as exc:
+        app.logger.error(f"Admin verify failed: {exc}")
+        return err("Could not update verification.", 500)
+
+
+# --------------------------------------------------------------------------
+# Account deletion
+# --------------------------------------------------------------------------
+
+@app.route("/api/account/delete", methods=["POST"])
+@login_required_api
+def api_delete_account():
     user_id = session["user_id"]
     profile = get_profile(user_id) or {}
     username = profile.get("username") or session.get("username", "")
-    password = request.form.get("password", "")
+
+    data = request.get_json(silent=True) or {}
+    password = data.get("password", "")
 
     if not password:
-        flash("Password is required to delete your account.")
-        return redirect(url_for("edit_profile"))
+        return err("Password is required.")
 
-    # Verify password before deleting.
     try:
         auth_client.auth.sign_in_with_password({
             "email": f"{username}{DOMAIN}",
@@ -832,32 +1071,50 @@ def delete_account():
         })
     except Exception as exc:
         app.logger.error(f"Delete account password check failed: {exc}")
-        flash("Incorrect password. Account was not deleted.")
-        return redirect(url_for("edit_profile"))
+        return err("Incorrect password.", 403)
 
     try:
-        # Delete the Supabase auth user first.
         db.auth.admin.delete_user(user_id)
     except Exception as exc:
         app.logger.error(f"Auth user deletion failed: {exc}")
-        flash("Could not delete account. Check server logs.")
-        return redirect(url_for("edit_profile"))
+        return err("Could not delete account.", 500)
 
     try:
         delete_user_data(user_id)
     except Exception as exc:
-        # Auth user is already deleted, so log cleanup issues.
         app.logger.error(f"User data cleanup failed: {exc}")
 
     session.pop("user_id", None)
     session.pop("username", None)
 
-    flash("Account deleted.")
-    return redirect(url_for("signin"))
-    
+    return ok()
+
+
 # --------------------------------------------------------------------------
-# Run
+# SPA serving
 # --------------------------------------------------------------------------
+
+@app.route("/favicon.ico")
+def favicon():
+    return "", 204
+
+
+@app.route("/health")
+def health():
+    return "ok", 200
+
+
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def catch_all(path):
+    if path.startswith("api/"):
+        return err("Not found.", 404)
+
+    if path.startswith("static/"):
+        return app.send_static_file(path.split("static/", 1)[1])
+
+    return render_template("index.html")
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
