@@ -568,17 +568,28 @@ def api_feed():
     except Exception:
         limit = 30
 
+    cursor = request.args.get("cursor")
+
     try:
-        response = (
+        query = (
             db.table("posts")
             .select("*, profiles(*)")
             .order("created_at", desc=True)
             .limit(limit)
-            .execute()
         )
 
+        # If cursor is provided, fetch posts older than the cursor
+        if cursor:
+            query = query.lt("created_at", cursor)
+
+        response = query.execute()
+
         posts = response.data or []
-        return ok(posts=hydrate_posts(posts))
+        
+        return ok(
+            posts=hydrate_posts(posts),
+            has_more=len(posts) == limit
+        )
     except Exception as exc:
         app.logger.error(f"Feed query failed: {exc}")
         return err("Could not load feed.", 500)
