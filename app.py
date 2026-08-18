@@ -55,6 +55,26 @@ VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
 VAPID_CLAIMS_EMAIL = os.environ.get("VAPID_CLAIMS_EMAIL", "mailto:admin@samaritan.app")
 
 
+# --------------------------------------------------------------------------
+# Voice chat (LiveKit)
+# --------------------------------------------------------------------------
+LIVEKIT_URL = os.environ.get("LIVEKIT_URL", "")
+LIVEKIT_API_KEY = os.environ.get("LIVEKIT_API_KEY", "")
+LIVEKIT_API_SECRET = os.environ.get("LIVEKIT_API_SECRET", "")
+
+VOICE_ROOMS = [
+    {"id": "lounge", "name": "The Lounge"},
+    {"id": "debate", "name": "The Debate"},
+    {"id": "study", "name": "The Study"},
+    {"id": "music", "name": "The Music Room"},
+    {"id": "latenight", "name": "Late Night"},
+]
+
+try:
+    from livekit.api import AccessToken
+except ImportError:
+    AccessToken = None
+    
 def normalize_username(raw):
     return (raw or "").strip().lower()
 
