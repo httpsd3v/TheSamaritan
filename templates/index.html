@@ -9,6 +9,7 @@
 <body>
     <main id="app" class="app"></main>
     <div id="toast" class="toast"></div>
+    <div id="voice-audio-slot" hidden></div>
 
     <script>
         const $ = s => document.querySelector(s);
@@ -93,17 +94,21 @@
         }
 
         function shell(c, a = "home", t = "The Samaritan", back = false) {
-            return `<div class="app-container">
-                <header class="app-header">
-                    <div class="header-left">${back ? `<button class="header-action" data-action="back">←</button>` : ""}<span class="app-title">${esc(t)}</span></div>
-                    <div class="header-right">
-                        ${state.me ? `<button class="header-action notif-button" data-action="notifications" title="Notifications">🔔<span class="notif-badge" id="notif-badge" style="display:none"></span></button>` : ""}
-                        <button class="header-action" data-action="toggle-theme">◐</button>
-                        ${state.me ? `<button class="header-action" data-action="logout">⏻</button>` : ""}
-                    </div>
-                </header>
-                <main class="main">${c}</main>${state.me ? bottomNav(a) : ""}
-            </div>`;
+                return `<div class="app-container">
+                    <header class="app-header">
+                        <div class="header-left">${back ? `<button class="header-action" data-action="back">←</button>` : ""}<span class="app-title">${esc(t)}</span></div>
+                        <div class="header-right">
+                            ${state.me ? `<button class="header-action" data-action="voice" title="Voice rooms">🎙</button>` : ""}
+                            ${state.me ? `<button class="header-action notif-button" data-action="notifications" title="Notifications">🔔<span class="notif-badge" id="notif-badge" style="display:none"></span></button>` : ""}
+                            <button class="header-action" data-action="toggle-theme">◐</button>
+                            ${state.me ? `<button class="header-action" data-action="logout">⏻</button>` : ""}
+                        </div>
+                    </header>
+                    <main class="main">${c}</main>
+                    ${state.me ? `<div id="voice-bar-slot">${voiceBarHTML()}</div>` : ""}
+                    ${state.me ? bottomNav(a) : ""}
+                </div>`;
+            }
         }
 
         function composer() {
@@ -373,6 +378,96 @@
         }
         function notifHTML(n) { let t = "interacted"; if (n.type === "reply") t = "replied"; else if (n.type === "like") t = "liked"; else if (n.type === "follow") t = "followed you"; return `<div class="post notif-item ${n.read ? "" : "unread"}" data-action="open-feed"><div class="post-header" style="margin-bottom:0">${av(n.actor)}<div class="author"><div class="author-name"><button class="link" data-open-profile="${esc(n.actor.username)}">${esc(n.actor.username)}</button>${vBadge(n.actor.verified)}</div><div class="timestamp">${ago(n.created_at)} · ${t}</div></div></div></div>`; }
 
+
+                // ------------------------------------------------------------------
+        // Voice chat (LiveKit)
+        // ------------------------------------------------------------------
+        const voice = { room: null, roomId: null, roomName: null, muted: false, participantCount: 0 };
+        
+        function voiceBarHTML() {
+            if (!voice.room) return "";
+            return `<div class="voice-bar">
+                <span class="voice-bar-dot"></span>
+                <span class="voice-bar-name">${esc(voice.roomName || "Voice")}</span>
+                <span class="voice-bar-count">👥 ${voice.participantCount}</span>
+                <button class="header-action" data-action="voice-mute" title="Mute">${voice.muted ? "🔇" : "🎙"}</button>
+                <button class="header-action" data-action="voice-leave" title="Leave">✕</button>
+            </div>`;
+        }
+        
+        function updateVoiceUI() {
+            voice.participantCount = voice.room ? (voice.room.remoteParticipants.size + 1) : 0;
+            const slot = $("#voice-bar-slot");
+            if (slot) slot.innerHTML = voiceBarHTML();
+        }
+        
+        async function showVoice() {
+            state.view = "voice";
+            setApp(shell(`<div class="feed"><div class="section-title">Voice rooms</div><div id="voice-rooms">Loading...</div><div class="empty" style="font-size:12px">Each room is a separate conversation. Only people in the same room can hear each other.</div></div>`, "", "Voice", true));
+            try {
+                const d = await api("/api/voice/rooms");
+                $("#voice-rooms").innerHTML = d.rooms.map(r => `
+                    <div class="post voice-room ${voice.roomId === r.id ? "active-room" : ""}">
+                        <div class="voice-room-name">${esc(r.name)}</div>
+                        <div class="voice-room-sub">${voice.roomId === r.id ? "You are in this room" : "Separate conversation"}</div>
+                        ${voice.roomId === r.id
+                            ? `<button class="primary-button" data-action="voice-leave">Leave room</button>`
+                            : `<button class="follow-button" data-join-voice="${esc(r.id)}">${voice.room ? "Switch room" : "Join"}</button>`}
+                    </div>`).join("");
+            } catch (e) {
+                toast(e.message);
+                const r = $("#voice-rooms");
+                if (r) r.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+            }
+        }
+        
+        async function joinVoice(roomId, roomName) {
+            try {
+                if (voice.room) { try { voice.room.disconnect(); } catch (e) {} voice.room = null; }
+                const d = await api(`/api/voice/token?room=${encodeURIComponent(roomId)}`);
+                toast("Connecting to voice...");
+                const lk = await import("https://cdn.jsdelivr.net/npm/livekit-client@2/+esm");
+                const room = new lk.Room();
+                voice.room = room; voice.roomId = roomId; voice.roomName = roomName || roomId; voice.muted = false;
+        
+                room.on(lk.RoomEvent.ParticipantConnected, updateVoiceUI);
+                room.on(lk.RoomEvent.ParticipantDisconnected, updateVoiceUI);
+                room.on(lk.RoomEvent.TrackSubscribed, (track) => {
+                    if (track.kind === "audio") {
+                        const el = track.attach();
+                        document.getElementById("voice-audio-slot").appendChild(el);
+                    }
+                });
+                room.on(lk.RoomEvent.TrackUnsubscribed, (track) => { track.detach().forEach(el => el.remove()); });
+                room.on(lk.RoomEvent.Disconnected, () => { voice.room = null; voice.roomId = null; voice.muted = false; updateVoiceUI(); });
+        
+                await room.connect(d.url, d.token);
+                await room.localParticipant.setMicrophoneEnabled(true);
+                updateVoiceUI();
+                showVoice();
+                toast(`Joined ${voice.roomName}`);
+            } catch (e) {
+                console.error("Voice join failed", e);
+                voice.room = null; voice.roomId = null; updateVoiceUI();
+                toast(e.message || "Voice connection failed");
+            }
+        }
+        
+        async function leaveVoice() {
+            if (voice.room) { try { await voice.room.disconnect(); } catch (e) {} }
+            voice.room = null; voice.roomId = null; voice.muted = false;
+            updateVoiceUI();
+            if (state.view === "voice") showVoice();
+            toast("Left voice");
+        }
+        
+        async function toggleMute() {
+            if (!voice.room) return;
+            voice.muted = !voice.muted;
+            await voice.room.localParticipant.setMicrophoneEnabled(!voice.muted);
+            updateVoiceUI();
+        }
+                
         async function init() {
             setupTheme();
             try {
@@ -384,6 +479,9 @@
 
         document.addEventListener("click", async e => {
             const a = e.target.closest("[data-action]");
+            if (act === "voice") { showVoice(); return; }
+            if (act === "voice-mute") { toggleMute(); return; }
+            if (act === "voice-leave") { leaveVoice(); return; }
             if (a) { const act = a.dataset.action; if (act === "toggle-theme") { toggleTheme(); return; } if (act === "logout") { await logout(); return; } if (act === "back") { showFeed(); return; } if (act === "edit-profile") { showEditProfile(); return; } if (act === "submit-post") { await submitPost(); return; } if (act === "auth-mode") { setAuthMode(a.dataset.mode); return; } if (act === "notifications") { showNotifications(); return; } if (act === "open-feed") { showFeed(); return; } }
             const bn = e.target.closest("[data-ban]"); if (bn) { await toggleBan(bn); return; }
             const bl = e.target.closest("[data-block]"); if (bl) { await toggleBlock(bl); return; }
@@ -399,6 +497,13 @@
             const fl = e.target.closest("[data-follow]"); if (fl) { await toggleFollow(fl); return; }
             const ry = e.target.closest("[data-reply]"); if (ry) { showReply(ry.dataset.reply, ry.dataset.post); return; }
             const vr = e.target.closest("[data-verify]"); if (vr) { await toggleVerify(vr.dataset.verify); return; }
+            const jv = e.target.closest("[data-join-voice]");
+            if (jv) {
+                const id = jv.dataset.joinVoice;
+                const name = jv.closest(".voice-room")?.querySelector(".voice-room-name")?.textContent || id;
+                await joinVoice(id, name);
+                return;
+            }
         });
 
         document.addEventListener("change", e => { if (e.target.id === "composer-media") previewMedia(e.target); if (e.target.id === "avatar-input") previewAvatar(e.target); });
