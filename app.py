@@ -1,8 +1,10 @@
 import os
 import re
+import io
 import uuid
 import json
 from functools import wraps
+from datetime import datetime, timezone, timedelta
 
 from flask import Flask, render_template, request, session, jsonify, send_from_directory
 
@@ -52,11 +54,25 @@ VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
 VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
 VAPID_CLAIMS_EMAIL = os.environ.get("VAPID_CLAIMS_EMAIL", "mailto:admin@samaritan.app")
 
-ADMIN_USERNAMES = set(
-    x.strip().lower()
-    for x in os.environ.get("ADMIN_USERNAMES", "").split(",")
-    if x.strip()
-)
+
+def normalize_username(raw):
+    return (raw or "").strip().lower()
+
+
+def _admin_variants(name):
+    n = normalize_username(name)
+    return {n, n.rstrip(".")}
+
+
+ADMIN_USERNAMES = set()
+for _x in os.environ.get("ADMIN_USERNAMES", "").split(","):
+    if _x.strip():
+        ADMIN_USERNAMES.update(_admin_variants(_x))
+
+
+def is_admin_username(username):
+    return bool(_admin_variants(username or "") & ADMIN_USERNAMES)
+
 
 if not SUPABASE_URL or not SUPABASE_ANON_KEY or not SUPABASE_SERVICE_ROLE_KEY:
     raise RuntimeError("Missing Supabase environment variables.")
@@ -77,27 +93,48 @@ def err(message, status=400):
     return jsonify({"ok": False, "error": message}), status
 
 
+def get_ban_remaining(profile):
+    bu = (profile or {}).get("banned_until")
+    if not bu:
+        return None
+    try:
+        until = datetime.fromisoformat(str(bu).replace("Z", "+00:00"))
+    except Exception:
+        return None
+    now = datetime.now(timezone.utc)
+    if until <= now:
+        return None
+    return until - now
+
+
+def ban_message(rem):
+    total_minutes = int(rem.total_seconds() // 60)
+    h, m = divmod(total_minutes, 60)
+    if h > 0:
+        return f"You are banned. Try again in {h}h {m}m."
+    return f"You are banned. Try again in {m}m."
+
+
 def login_required_api(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not session.get("user_id"):
+        uid = session.get("user_id")
+        if not uid:
             return err("Not signed in.", 401)
+        prof = get_profile(uid)
+        if prof:
+            rem = get_ban_remaining(prof)
+            if rem is not None:
+                session.clear()
+                return err(ban_message(rem), 403)
         return f(*args, **kwargs)
     return decorated
 
 
 def require_admin():
-    if normalize_username(session.get("username", "")) not in ADMIN_USERNAMES:
+    if not is_admin_username(session.get("username", "")):
         return err("Forbidden.", 403)
     return None
-
-
-def is_admin_username(username):
-    return normalize_username(username) in ADMIN_USERNAMES
-
-
-def normalize_username(raw):
-    return (raw or "").strip().lower()
 
 
 def authenticate(username, password):
@@ -132,6 +169,7 @@ def get_profile(uid):
         p.setdefault("bio", "")
         p.setdefault("verified", False)
         p.setdefault("avatar_url", "")
+        p.setdefault("banned_until", None)
         return p
     except Exception as e:
         app.logger.error(f"get_profile failed: {e}")
@@ -176,11 +214,16 @@ def upload_file(f, folder):
         raise ValueError("File too large. Max 8 MB.")
     path = f"{folder}/{uuid.uuid4()}.{ext}"
     try:
-        db.storage.from_(STORAGE_BUCKET).upload(path, data, {"content-type": mime})
+        try:
+            db.storage.from_(STORAGE_BUCKET).upload(path, data, {"content-type": mime})
+        except TypeError:
+            db.storage.from_(STORAGE_BUCKET).upload(path, io.BytesIO(data), {"content-type": mime})
         return db.storage.from_(STORAGE_BUCKET).get_public_url(path)
+    except ValueError:
+        raise
     except Exception as e:
         app.logger.error(f"Storage upload failed: {e}")
-        raise ValueError("Media upload failed.")
+        raise ValueError(f"Media upload failed: {e}")
 
 
 def delete_media(url):
@@ -219,6 +262,7 @@ def serialize_profile(r):
         "bio": r.get("bio", ""),
         "verified": bool(r.get("verified", False)),
         "avatar_url": r.get("avatar_url", ""),
+        "banned_until": r.get("banned_until"),
     }
 
 
@@ -322,7 +366,9 @@ def notify_user(user_id, title, body, url="/"):
                     vapid_claims={"sub": VAPID_CLAIMS_EMAIL},
                 )
             except WebPushException as e:
-                if getattr(getattr(e, "response", None), "status_code", None) in (404, 410):
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                app.logger.error(f"webpush failed for sub {s.get('id')}: status={status}")
+                if status in (400, 401, 403, 404, 410):
                     dead.append(s.get("id"))
         for sid in dead:
             db.table("push_subscriptions").delete().eq("id", sid).execute()
@@ -337,14 +383,21 @@ def notify_user(user_id, title, body, url="/"):
 def api_me():
     if not session.get("user_id"):
         return ok(authenticated=False)
-    p = get_profile(session["user_id"]) or {
-        "id": session["user_id"],
-        "username": session.get("username", "unknown"),
-        "bio": "",
-        "verified": False,
-        "avatar_url": "",
-    }
-    ensure_profile(p["id"], p["username"])
+    p = get_profile(session["user_id"])
+    if p:
+        if get_ban_remaining(p) is not None:
+            session.clear()
+            return ok(authenticated=False)
+    else:
+        p = {
+            "id": session["user_id"],
+            "username": session.get("username", "unknown"),
+            "bio": "",
+            "verified": False,
+            "avatar_url": "",
+            "banned_until": None,
+        }
+        ensure_profile(p["id"], p["username"])
     return ok(
         authenticated=True,
         user={"id": session["user_id"], "username": p["username"]},
@@ -359,6 +412,18 @@ def api_signin():
     u, pw = normalize_username(d.get("username", "")), d.get("password", "")
     if not u or not pw:
         return err("Username and password are required.")
+
+    # Ban check before allowing login
+    try:
+        r = db.table("profiles").select("*").eq("username", u).limit(1).execute()
+        prof = r.data[0] if r.data else None
+    except Exception:
+        prof = None
+    if prof:
+        rem = get_ban_remaining(prof)
+        if rem is not None:
+            return err(ban_message(rem), 403)
+
     try:
         authenticate(u, pw)
     except Exception as e:
@@ -686,6 +751,7 @@ def api_profile(uname):
     p.setdefault("bio", "")
     p.setdefault("verified", False)
     p.setdefault("avatar_url", "")
+    p.setdefault("banned_until", None)
     try:
         posts = db.table("posts").select("*, profiles(*)").eq("user_id", p["id"]).order("created_at", desc=True).limit(50).execute().data or []
     except Exception:
@@ -849,6 +915,29 @@ def api_admin_verify(uid):
     except Exception as e:
         app.logger.error(f"Verify failed: {e}")
         return err("Could not update.", 500)
+
+
+@app.route("/api/admin/ban/<uid>", methods=["POST"])
+@login_required_api
+def api_admin_ban(uid):
+    admin_error = require_admin()
+    if admin_error:
+        return admin_error
+    d = request.get_json(silent=True) or {}
+    try:
+        hours = float(d.get("hours", 0))
+    except Exception:
+        hours = 0
+    if hours <= 0:
+        banned_until = None
+    else:
+        banned_until = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+    try:
+        db.table("profiles").update({"banned_until": banned_until}).eq("id", uid).execute()
+        return ok(banned_until=banned_until)
+    except Exception as e:
+        app.logger.error(f"Ban failed: {e}")
+        return err("Could not update ban.", 500)
 
 
 # --------------------------------------------------------------------------
