@@ -23,9 +23,8 @@
         const shareIcon = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>`;
         const imageIcon = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>`;
 
-        function setApp(h) { 
-            $("#app").innerHTML = h; 
-            // Re-apply unread badge after every render to fix the disappearing number bug
+        function setApp(h) {
+            $("#app").innerHTML = h;
             setTimeout(updateBadge, 0);
         }
 
@@ -40,16 +39,16 @@
         }
 
         function toast(m) { const e = $("#toast"); e.textContent = m; e.classList.add("show"); setTimeout(() => e.classList.remove("show"), 2600); }
-        function esc(v) { return String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;"); }
-        function fmt(t) { let s = esc(t); return s.replace(/#([a-zA-Z0-9_]+)/g,`<span class="tag">#$1</span>`).replace(/@([a-zA-Z0-9_.]+)/g,`<span class="tag">@$1</span>`).replace(/\n/g,"<br>"); }
-        function ago(iso) { if(!iso)return""; const d=new Date(iso); if(isNaN(d))return""; const s=Math.floor((Date.now()-d)/1000); if(s<60)return"now"; if(s<3600)return`${Math.floor(s/60)}m`; if(s<86400)return`${Math.floor(s/3600)}h`; if(s<604800)return`${Math.floor(s/86400)}d`; return d.toLocaleDateString(); }
+        function esc(v) { return String(v ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;"); }
+        function fmt(t) { let s = esc(t); return s.replace(/#([a-zA-Z0-9_]+)/g, `<span class="tag">#$1</span>`).replace(/@([a-zA-Z0-9_.]+)/g, `<span class="tag">@$1</span>`).replace(/\n/g, "<br>"); }
+        function ago(iso) { if (!iso) return ""; const d = new Date(iso); if (isNaN(d)) return ""; const s = Math.floor((Date.now() - d) / 1000); if (s < 60) return "now"; if (s < 3600) return `${Math.floor(s / 60)}m`; if (s < 86400) return `${Math.floor(s / 3600)}h`; if (s < 604800) return `${Math.floor(s / 86400)}d`; return d.toLocaleDateString(); }
         function vBadge(v) { return v ? `<span class="verified" title="Verified">✓</span>` : ""; }
-        function av(p, cls="avatar") { return p.avatar_url ? `<img class="${cls}" src="${esc(p.avatar_url)}" alt="" loading="lazy" />` : `<div class="${cls} avatar-fallback">${esc((p.username||"?")[0].toUpperCase())}</div>`; }
+        function av(p, cls = "avatar") { return p.avatar_url ? `<img class="${cls}" src="${esc(p.avatar_url)}" alt="" loading="lazy" />` : `<div class="${cls} avatar-fallback">${esc((p.username || "?")[0].toUpperCase())}</div>`; }
         function canDelPost(p) { return state.me && p && p.author && (state.isAdmin || p.author.id === state.me.id); }
         function canDelComment(c) { return state.me && c && c.author && (state.isAdmin || c.author.id === state.me.id || c.post_author_id === state.me.id); }
 
         function setupTheme() { document.documentElement.dataset.theme = localStorage.getItem("samaritan-theme") === "light" ? "light" : "dark"; }
-        function toggleTheme() { const n = document.documentElement.dataset.theme === "dark" ? "light" : "dark"; document.documentElement.dataset.theme = n; localStorage.setItem("samaritan-theme", n); toast(`${n==="dark"?"Dark":"Light"} mode`); }
+        function toggleTheme() { const n = document.documentElement.dataset.theme === "dark" ? "light" : "dark"; document.documentElement.dataset.theme = n; localStorage.setItem("samaritan-theme", n); toast(`${n === "dark" ? "Dark" : "Light"} mode`); }
 
         function renderAuth() {
             state.view = "auth";
@@ -58,13 +57,13 @@
                     <div class="auth-top"><h1 class="auth-title">The Samaritan</h1><button class="header-action" data-action="toggle-theme">◐</button></div>
                     <p class="auth-sub">Username and password only.</p>
                     <div class="auth-tabs">
-                        <button class="auth-tab ${state.authMode==="signin"?"active":""}" data-action="auth-mode" data-mode="signin">Sign In</button>
-                        <button class="auth-tab ${state.authMode==="signup"?"active":""}" data-action="auth-mode" data-mode="signup">Sign Up</button>
+                        <button class="auth-tab ${state.authMode === "signin" ? "active" : ""}" data-action="auth-mode" data-mode="signin">Sign In</button>
+                        <button class="auth-tab ${state.authMode === "signup" ? "active" : ""}" data-action="auth-mode" data-mode="signup">Sign Up</button>
                     </div>
                     <form id="auth-form">
                         <div class="field"><label>Username</label><input name="username" class="input" autocomplete="username" required /></div>
                         <div class="field"><label>Password</label><input name="password" type="password" class="input" autocomplete="current-password" required /></div>
-                        <button class="primary-button auth-button">${state.authMode==="signup"?"Create account":"Sign in"}</button>
+                        <button class="primary-button auth-button">${state.authMode === "signup" ? "Create account" : "Sign in"}</button>
                     </form>
                 </div></div>
             `);
@@ -72,33 +71,33 @@
         function setAuthMode(m) { state.authMode = m; renderAuth(); }
         async function submitAuth(f) {
             try {
-                const d = await api(`/api/${state.authMode}`, { method:"POST", json:{ username:f.username.value.trim(), password:f.password.value } });
+                const d = await api(`/api/${state.authMode}`, { method: "POST", json: { username: f.username.value.trim(), password: f.password.value } });
                 state.me = d.user; state.profile = d.profile; state.isAdmin = d.is_admin;
                 toast(`Welcome @${d.user.username}`); showFeed();
-            } catch(e) { toast(e.message); }
+            } catch (e) { toast(e.message); }
         }
 
-        function bottomNav(a="home") {
-            const adm = state.isAdmin ? `<button class="nav-item ${a==="admin"?"active":""}" data-nav="admin">Verify</button>` : "";
+        function bottomNav(a = "home") {
+            const adm = state.isAdmin ? `<button class="nav-item ${a === "admin" ? "active" : ""}" data-nav="admin">Verify</button>` : "";
             return `<nav class="bottom-nav">
-                <button class="nav-item ${a==="home"?"active":""}" data-nav="home">Home</button>
-                <button class="nav-item ${a==="search"?"active":""}" data-nav="search">Search</button>
+                <button class="nav-item ${a === "home" ? "active" : ""}" data-nav="home">Home</button>
+                <button class="nav-item ${a === "search" ? "active" : ""}" data-nav="search">Search</button>
                 <button class="nav-create" data-nav="compose">+</button>${adm}
-                <button class="nav-item ${a==="profile"?"active":""}" data-nav="profile">Me</button>
+                <button class="nav-item ${a === "profile" ? "active" : ""}" data-nav="profile">Me</button>
             </nav>`;
         }
 
-        function shell(c, a="home", t="The Samaritan", back=false) {
+        function shell(c, a = "home", t = "The Samaritan", back = false) {
             return `<div class="app-container">
                 <header class="app-header">
-                    <div class="header-left">${back?`<button class="header-action" data-action="back">←</button>`:""}<span class="app-title">${esc(t)}</span></div>
+                    <div class="header-left">${back ? `<button class="header-action" data-action="back">←</button>` : ""}<span class="app-title">${esc(t)}</span></div>
                     <div class="header-right">
-                        ${state.me?`<button class="header-action notif-button" data-action="notifications" title="Notifications">🔔<span class="notif-badge" id="notif-badge" style="display:none"></span></button>`:""}
+                        ${state.me ? `<button class="header-action notif-button" data-action="notifications" title="Notifications">🔔<span class="notif-badge" id="notif-badge" style="display:none"></span></button>` : ""}
                         <button class="header-action" data-action="toggle-theme">◐</button>
-                        ${state.me?`<button class="header-action" data-action="logout">⏻</button>`:""}
+                        ${state.me ? `<button class="header-action" data-action="logout">⏻</button>` : ""}
                     </div>
                 </header>
-                <main class="main">${c}</main>${state.me?bottomNav(a):""}
+                <main class="main">${c}</main>${state.me ? bottomNav(a) : ""}
             </div>`;
         }
 
@@ -119,84 +118,103 @@
             await loadFeed(true); setupInfiniteScroll();
         }
 
-        async function loadFeed(reset=false) {
-            if (reset) { state.feedCursor = null; state.hasMoreFeed = true; const l=$("#feed-list"); if(l) l.innerHTML=""; }
+        async function loadFeed(reset = false) {
+            if (reset) { state.feedCursor = null; state.hasMoreFeed = true; const l = $("#feed-list"); if (l) l.innerHTML = ""; }
             if (state.isFeedLoading || !state.hasMoreFeed) return;
-            state.isFeedLoading = true; const s=$("#feed-sentinel"); if(s) s.innerHTML=`<div class="loading-spinner">Loading...</div>`;
+            state.isFeedLoading = true; const s = $("#feed-sentinel"); if (s) s.innerHTML = `<div class="loading-spinner">Loading...</div>`;
             try {
-                let u = "/api/feed?limit=30"; if(state.feedCursor) u += `&cursor=${encodeURIComponent(state.feedCursor)}`;
+                let u = "/api/feed?limit=30"; if (state.feedCursor) u += `&cursor=${encodeURIComponent(state.feedCursor)}`;
                 const d = await api(u); const np = d.posts || [];
                 state.feed = reset ? np : [...state.feed, ...np]; state.hasMoreFeed = d.has_more !== false;
-                const l = $("#feed-list"); if(l) { if(reset && !np.length) l.innerHTML=`<div class="empty">No posts yet.</div>`; else np.forEach(p => l.insertAdjacentHTML("beforeend", postHTML(p))); }
-                if(np.length) state.feedCursor = np[np.length-1].created_at;
-            } catch(e) { toast(e.message); const l=$("#feed-list"); if(l&&reset) l.innerHTML=`<div class="empty">Could not load feed.</div>`; }
-            finally { state.isFeedLoading = false; if(s) s.innerHTML=""; }
+                const l = $("#feed-list"); if (l) { if (reset && !np.length) l.innerHTML = `<div class="empty">No posts yet.</div>`; else np.forEach(p => l.insertAdjacentHTML("beforeend", postHTML(p))); }
+                if (np.length) state.feedCursor = np[np.length - 1].created_at;
+            } catch (e) { toast(e.message); const l = $("#feed-list"); if (l && reset) l.innerHTML = `<div class="empty">Could not load feed.</div>`; }
+            finally { state.isFeedLoading = false; if (s) s.innerHTML = ""; }
         }
 
         function setupInfiniteScroll() {
-            const s = $("#feed-sentinel"); if(!s) return;
-            new IntersectionObserver(e => { if(e[0].isIntersecting && !state.isFeedLoading && state.hasMoreFeed) loadFeed(false); }, { rootMargin:"300px" }).observe(s);
+            const s = $("#feed-sentinel"); if (!s) return;
+            new IntersectionObserver(e => { if (e[0].isIntersecting && !state.isFeedLoading && state.hasMoreFeed) loadFeed(false); }, { rootMargin: "300px" }).observe(s);
         }
 
         function postHTML(p) {
             const cr = state.me && p.author && p.author.id !== state.me.id;
             return `<article class="post" data-post-id="${esc(p.id)}">
-                <div class="post-header">${av(p.author)}<div class="author"><div class="author-name"><button class="link" data-open-profile="${esc(p.author.username)}">${esc(p.author.username)}</button>${vBadge(p.author.verified)}</div><div class="timestamp">${ago(p.created_at)}</div></div>${canDelPost(p)?`<button class="header-action" style="margin-left:auto" data-delete="${esc(p.id)}" title="Delete">×</button>`:""}</div>
-                ${p.content?`<div class="post-content">${fmt(p.content)}</div>`:""}${p.media_url?`<img class="post-media" src="${esc(p.media_url)}" alt="" loading="lazy" />`:""}
+                <div class="post-header">${av(p.author)}<div class="author"><div class="author-name"><button class="link" data-open-profile="${esc(p.author.username)}">${esc(p.author.username)}</button>${vBadge(p.author.verified)}</div><div class="timestamp">${ago(p.created_at)}</div></div>${canDelPost(p) ? `<button class="header-action" style="margin-left:auto" data-delete="${esc(p.id)}" title="Delete">×</button>` : ""}</div>
+                ${p.content ? `<div class="post-content">${fmt(p.content)}</div>` : ""}${p.media_url ? `<img class="post-media" src="${esc(p.media_url)}" alt="" loading="lazy" />` : ""}
                 <div class="post-actions">
-                    <button class="post-action like-button ${p.liked?"active":""}" data-like="${esc(p.id)}">${heartIcon}<span data-like-count="${esc(p.id)}">${p.likes}</span></button>
+                    <button class="post-action like-button ${p.liked ? "active" : ""}" data-like="${esc(p.id)}">${heartIcon}<span data-like-count="${esc(p.id)}">${p.likes}</span></button>
                     <button class="post-action" data-toggle-comments="${esc(p.id)}">${commentIcon}<span data-comment-count="${esc(p.id)}">${p.comments}</span></button>
                     <button class="post-action" data-share="${esc(p.id)}">${shareIcon}</button>
-                    ${cr?`<button class="post-action" data-report-post="${esc(p.id)}" title="Report">⚑</button>`:""}
+                    ${cr ? `<button class="post-action" data-report-post="${esc(p.id)}" title="Report">⚑</button>` : ""}
                 </div>
                 <div class="comments" id="comments-${esc(p.id)}" style="display:none"><div class="comment-list" id="comment-list-${esc(p.id)}"></div><form class="comment-form" data-comment-form="${esc(p.id)}"><input name="content" placeholder="Reply..." maxlength="500" required /><button>Reply</button></form></div>
             </article>`;
         }
 
         async function submitPost() {
-            const t=$("#composer-text"), f=$("#composer-media"); if(!t||!f) return;
-            const fd = new FormData(); fd.append("content", t.value.trim()); if(f.files&&f.files[0]) fd.append("media", f.files[0]);
+            const t = $("#composer-text"), f = $("#composer-media"); if (!t || !f) return;
+            const fd = new FormData(); fd.append("content", t.value.trim()); if (f.files && f.files[0]) fd.append("media", f.files[0]);
             try {
-                await api("/api/posts", { method:"POST", body:fd }); state.feedCursor=null; state.hasMoreFeed=true; const l=$("#feed-list"); if(l) l.innerHTML=""; await loadFeed(true);
-                t.value=""; f.value=""; const pv=$("#composer-preview"); if(pv) pv.innerHTML=""; toast("Posted");
-            } catch(e) { toast(e.message); }
+                await api("/api/posts", { method: "POST", body: fd }); state.feedCursor = null; state.hasMoreFeed = true; const l = $("#feed-list"); if (l) l.innerHTML = ""; await loadFeed(true);
+                t.value = ""; f.value = ""; const pv = $("#composer-preview"); if (pv) pv.innerHTML = ""; toast("Posted");
+            } catch (e) { toast(e.message); }
         }
 
-        function previewMedia(i) { const p=$("#composer-preview"); if(!p) return; p.innerHTML = i.files&&i.files[0] ? `<img src="${URL.createObjectURL(i.files[0])}" class="preview-media" />` : ""; }
-        async function toggleLike(pid) { try { const d=await api(`/api/posts/${pid}/like`,{method:"POST"}); const b=document.querySelector(`[data-like="${pid}"]`); if(!b) return; b.classList.toggle("active",d.liked); const c=b.querySelector(`[data-like-count="${pid}"]`); if(c) c.textContent=d.likes; } catch(e){toast(e.message);} }
-        async function deletePost(pid) { if(!confirm("Delete this post?")) return; try { await api(`/api/posts/${pid}/delete`,{method:"POST"}); const a=document.querySelector(`[data-post-id="${pid}"]`); if(a) a.remove(); state.feed=state.feed.filter(p=>p.id!==pid); if(state.view==="feed"&&!state.feed.length){const l=$("#feed-list");if(l)l.innerHTML=`<div class="empty">No posts yet.</div>`;} toast("Deleted"); } catch(e){toast(e.message);} }
-        async function deleteComment(cid, pid) { if(!confirm("Delete comment?")) return; try { await api(`/api/comments/${cid}/delete`,{method:"POST"}); await loadComments(pid); toast("Deleted"); } catch(e){toast(e.message);} }
-        async function reportPost(pid) { const r=prompt("Reason?"); if(r===null||!r.trim()){if(r!==null)toast("Reason required");return;} try { await api(`/api/posts/${pid}/report`,{method:"POST",json:{reason:r.trim()}}); toast("Reported"); } catch(e){toast(e.message);} }
-        async function reportComment(cid) { const r=prompt("Reason?"); if(r===null||!r.trim()){if(r!==null)toast("Reason required");return;} try { await api(`/api/comments/${cid}/report`,{method:"POST",json:{reason:r.trim()}}); toast("Reported"); } catch(e){toast(e.message);} }
-        async function changePassword(f) { if(f.new_password.value!==f.confirm_password.value){toast("Passwords don't match");return;} if(f.new_password.value.length<6){toast("Too short");return;} try { await api("/api/account/password",{method:"POST",json:{current_password:f.current_password.value,new_password:f.new_password.value}}); f.reset(); toast("Changed"); } catch(e){toast(e.message);} }
+        function previewMedia(i) { const p = $("#composer-preview"); if (!p) return; p.innerHTML = i.files && i.files[0] ? `<img src="${URL.createObjectURL(i.files[0])}" class="preview-media" />` : ""; }
 
-        async function toggleComments(pid) { const b=document.getElementById(`comments-${pid}`); if(!b) return; if(b.style.display==="none"){b.style.display="block";await loadComments(pid);} else b.style.display="none"; }
-        async function loadComments(pid) { try { const d=await api(`/api/posts/${pid}/comments`); renderComments(pid, d.comments); const c=document.querySelector(`[data-comment-count="${pid}"]`); if(c) c.textContent=d.comments.length; } catch(e){toast(e.message);} }
+        // OPTIMISTIC LIKE: instant UI, revert on failure
+        async function toggleLike(pid) {
+            const b = document.querySelector(`[data-like="${pid}"]`);
+            if (!b) return;
+            const countSpan = b.querySelector(`[data-like-count="${pid}"]`);
+            const wasLiked = b.classList.contains("active");
+            const currentCount = parseInt(countSpan?.textContent || "0");
+
+            b.classList.toggle("active", !wasLiked);
+            if (countSpan) countSpan.textContent = wasLiked ? currentCount - 1 : currentCount + 1;
+
+            try {
+                const d = await api(`/api/posts/${pid}/like`, { method: "POST" });
+                b.classList.toggle("active", d.liked);
+                if (countSpan) countSpan.textContent = d.likes;
+            } catch (e) {
+                b.classList.toggle("active", wasLiked);
+                if (countSpan) countSpan.textContent = currentCount;
+                toast(e.message);
+            }
+        }
+
+        async function deletePost(pid) { if (!confirm("Delete this post?")) return; try { await api(`/api/posts/${pid}/delete`, { method: "POST" }); const a = document.querySelector(`[data-post-id="${pid}"]`); if (a) a.remove(); state.feed = state.feed.filter(p => p.id !== pid); if (state.view === "feed" && !state.feed.length) { const l = $("#feed-list"); if (l) l.innerHTML = `<div class="empty">No posts yet.</div>`; } toast("Deleted"); } catch (e) { toast(e.message); } }
+        async function deleteComment(cid, pid) { if (!confirm("Delete comment?")) return; try { await api(`/api/comments/${cid}/delete`, { method: "POST" }); await loadComments(pid); toast("Deleted"); } catch (e) { toast(e.message); } }
+        async function reportPost(pid) { const r = prompt("Reason?"); if (r === null || !r.trim()) { if (r !== null) toast("Reason required"); return; } try { await api(`/api/posts/${pid}/report`, { method: "POST", json: { reason: r.trim() } }); toast("Reported"); } catch (e) { toast(e.message); } }
+        async function reportComment(cid) { const r = prompt("Reason?"); if (r === null || !r.trim()) { if (r !== null) toast("Reason required"); return; } try { await api(`/api/comments/${cid}/report`, { method: "POST", json: { reason: r.trim() } }); toast("Reported"); } catch (e) { toast(e.message); } }
+        async function changePassword(f) { if (f.new_password.value !== f.confirm_password.value) { toast("Passwords don't match"); return; } if (f.new_password.value.length < 6) { toast("Too short"); return; } try { await api("/api/account/password", { method: "POST", json: { current_password: f.current_password.value, new_password: f.new_password.value } }); f.reset(); toast("Changed"); } catch (e) { toast(e.message); } }
+
+        async function toggleComments(pid) { const b = document.getElementById(`comments-${pid}`); if (!b) return; if (b.style.display === "none") { b.style.display = "block"; await loadComments(pid); } else b.style.display = "none"; }
+        async function loadComments(pid) { try { const d = await api(`/api/posts/${pid}/comments`); renderComments(pid, d.comments); const c = document.querySelector(`[data-comment-count="${pid}"]`); if (c) c.textContent = d.comments.length; } catch (e) { toast(e.message); } }
         function renderComments(pid, comments) {
-            const l=document.getElementById(`comment-list-${pid}`); if(!l) return;
-            const bp={}; comments.forEach(c=>{const p=c.parent_comment_id||"root";if(!bp[p])bp[p]=[];bp[p].push(c);});
-            function rn(nodes, d=0) { return nodes.map(c=>{const ch=bp[c.id]||[];return commentHTML(c,d)+rn(ch,d+1);}).join(""); }
-            const roots=bp.root||[]; l.innerHTML = roots.length ? rn(roots) : `<div class="empty">No replies yet.</div>`;
+            const l = document.getElementById(`comment-list-${pid}`); if (!l) return;
+            const bp = {}; comments.forEach(c => { const p = c.parent_comment_id || "root"; if (!bp[p]) bp[p] = []; bp[p].push(c); });
+            function rn(nodes, d = 0) { return nodes.map(c => { const ch = bp[c.id] || []; return commentHTML(c, d) + rn(ch, d + 1); }).join(""); }
+            const roots = bp.root || []; l.innerHTML = roots.length ? rn(roots) : `<div class="empty">No replies yet.</div>`;
         }
         function commentHTML(c, d) {
-            const ind=Math.min(d,3)*14, cd=canDelComment(c), cr=state.me&&c.author&&c.author.id!==state.me.id;
-            return `<div class="comment" style="margin-left:${ind}px" data-comment-id="${esc(c.id)}">${av(c.author,"avatar avatar-sm")}<div class="comment-body"><div class="author-name"><button class="link" data-open-profile="${esc(c.author.username)}">${esc(c.author.username)}</button>${vBadge(c.author.verified)}</div><div class="comment-content">${fmt(c.content)}</div><div class="comment-actions"><button data-reply="${esc(c.id)}" data-post="${esc(c.post_id)}">Reply</button>${cd?`<button data-delete-comment="${esc(c.id)}" data-post="${esc(c.post_id)}">Delete</button>`:""}${cr?`<button data-report-comment="${esc(c.id)}">Report</button>`:""}</div><div class="reply-form-holder" id="reply-form-${esc(c.id)}"></div></div></div>`;
+            const ind = Math.min(d, 3) * 14, cd = canDelComment(c), cr = state.me && c.author && c.author.id !== state.me.id;
+            return `<div class="comment" style="margin-left:${ind}px" data-comment-id="${esc(c.id)}">${av(c.author, "avatar avatar-sm")}<div class="comment-body"><div class="author-name"><button class="link" data-open-profile="${esc(c.author.username)}">${esc(c.author.username)}</button>${vBadge(c.author.verified)}</div><div class="comment-content">${fmt(c.content)}</div><div class="comment-actions"><button data-reply="${esc(c.id)}" data-post="${esc(c.post_id)}">Reply</button>${cd ? `<button data-delete-comment="${esc(c.id)}" data-post="${esc(c.post_id)}">Delete</button>` : ""}${cr ? `<button data-report-comment="${esc(c.id)}">Report</button>` : ""}</div><div class="reply-form-holder" id="reply-form-${esc(c.id)}"></div></div></div>`;
         }
-        function showReply(cid, pid) { const h=document.getElementById(`reply-form-${cid}`); if(!h) return; if(h.innerHTML.trim()){h.innerHTML="";return;} h.innerHTML=`<form class="comment-form" data-reply-form="${esc(pid)}" data-parent="${esc(cid)}"><input name="content" placeholder="Reply..." maxlength="500" required /><button>Reply</button></form>`; h.querySelector("input").focus(); }
-        async function submitComment(f) { const pid=f.dataset.commentForm||f.dataset.replyForm, par=f.dataset.parent||null, inp=f.querySelector(`input[name="content"]`), txt=inp.value.trim(); if(!txt) return; try { await api(`/api/posts/${pid}/comments`,{method:"POST",json:{content:txt,parent_id:par}}); f.reset(); await loadComments(pid); } catch(e){toast(e.message);} }
+        function showReply(cid, pid) { const h = document.getElementById(`reply-form-${cid}`); if (!h) return; if (h.innerHTML.trim()) { h.innerHTML = ""; return; } h.innerHTML = `<form class="comment-form" data-reply-form="${esc(pid)}" data-parent="${esc(cid)}"><input name="content" placeholder="Reply..." maxlength="500" required /><button>Reply</button></form>`; h.querySelector("input").focus(); }
+        async function submitComment(f) { const pid = f.dataset.commentForm || f.dataset.replyForm, par = f.dataset.parent || null, inp = f.querySelector(`input[name="content"]`), txt = inp.value.trim(); if (!txt) return; try { await api(`/api/posts/${pid}/comments`, { method: "POST", json: { content: txt, parent_id: par } }); f.reset(); await loadComments(pid); } catch (e) { toast(e.message); } }
 
         async function showProfile(uname = null) {
             const u = uname || state.me.username;
             state.view = "profile";
-        
-            // FIX: Corrected argument order for shell() so the header shows "@username" instead of "false"
             setApp(shell(
                 `<div class="feed"><div id="profile-root">Loading...</div></div>`,
                 u === state.me.username ? "profile" : "",
                 `@${u}`,
                 u !== state.me.username
             ));
-        
             try {
                 const d = await api(`/api/profile/${encodeURIComponent(u)}`);
                 state.profileData = d;
@@ -208,198 +226,155 @@
                 if (r) r.innerHTML = `<div class="empty">Could not load.</div>`;
             }
         }
-        
+
         function profileHeader(d) {
-            const p=d.profile;
-            return `<section class="post profile-card"><div class="profile-top">${av(p,"avatar avatar-xl")}<div class="profile-actions">${d.is_me?`<button class="follow-button" data-action="edit-profile">Edit profile</button>`:`<button class="follow-button" data-follow="${esc(p.id)}" data-following="${d.is_following}">${d.is_following?"Following":"Follow"}</button>`}</div></div><div class="profile-name">${esc(p.username)}${vBadge(p.verified)}</div><div class="profile-handle">@${esc(p.username)}</div>${p.bio?`<p class="profile-bio">${fmt(p.bio)}</p>`:""}<div class="profile-stats"><div class="stat"><span class="stat-value">${d.followers}</span><span class="stat-label">Followers</span></div><div class="stat"><span class="stat-value">${d.following}</span><span class="stat-label">Following</span></div><div class="stat"><span class="stat-value">${d.posts.length}</span><span class="stat-label">Posts</span></div></div></section>`;
+            const p = d.profile;
+            const blockBtn = d.is_me ? "" : `<button class="follow-button" data-block="${esc(p.id)}" style="margin-left:8px; ${d.is_blocked ? "border-color: var(--text);" : ""}">${d.is_blocked ? "Blocked" : "Block"}</button>`;
+            return `<section class="post profile-card"><div class="profile-top">${av(p, "avatar avatar-xl")}<div class="profile-actions">${d.is_me ? `<button class="follow-button" data-action="edit-profile">Edit profile</button>` : `<button class="follow-button" data-follow="${esc(p.id)}" data-following="${d.is_following}">${d.is_following ? "Following" : "Follow"}</button>${blockBtn}`}</div></div><div class="profile-name">${esc(p.username)}${vBadge(p.verified)}</div><div class="profile-handle">@${esc(p.username)}</div>${p.bio ? `<p class="profile-bio">${fmt(p.bio)}</p>` : ""}<div class="profile-stats"><div class="stat"><span class="stat-value">${d.followers}</span><span class="stat-label">Followers</span></div><div class="stat"><span class="stat-value">${d.following}</span><span class="stat-label">Following</span></div><div class="stat"><span class="stat-value">${d.posts.length}</span><span class="stat-label">Posts</span></div></div></section>`;
         }
-        async function toggleFollow(b) { try { const d=await api(`/api/follow/${b.dataset.follow}`,{method:"POST"}); b.dataset.following=d.following; b.textContent=d.following?"Following":"Follow"; if(state.profileData&&state.profileData.profile.id===b.dataset.follow) state.profileData.is_following=d.following; } catch(e){toast(e.message);} }
+
+        // OPTIMISTIC FOLLOW: instant UI, revert on failure
+        async function toggleFollow(b) {
+            const uid = b.dataset.follow;
+            const wasFollowing = b.dataset.following === "true";
+            b.dataset.following = String(!wasFollowing);
+            b.textContent = wasFollowing ? "Follow" : "Following";
+            try {
+                const d = await api(`/api/follow/${uid}`, { method: "POST" });
+                b.dataset.following = String(d.following);
+                b.textContent = d.following ? "Following" : "Follow";
+                if (state.profileData && state.profileData.profile.id === uid) state.profileData.is_following = d.following;
+            } catch (e) {
+                b.dataset.following = String(wasFollowing);
+                b.textContent = wasFollowing ? "Following" : "Follow";
+                toast(e.message);
+            }
+        }
+
+        // OPTIMISTIC BLOCK: instant UI, revert on failure
+        async function toggleBlock(b) {
+            const uid = b.dataset.block;
+            const wasBlocked = b.textContent === "Blocked";
+            b.textContent = wasBlocked ? "Block" : "Blocked";
+            b.style.borderColor = wasBlocked ? "var(--border)" : "var(--text)";
+            try {
+                const d = await api(`/api/block/${uid}`, { method: "POST" });
+                if (d.blocked) toast("User blocked. Their posts are hidden from your feed.");
+                else toast("User unblocked.");
+            } catch (e) {
+                b.textContent = wasBlocked ? "Blocked" : "Block";
+                b.style.borderColor = wasBlocked ? "var(--text)" : "var(--border)";
+                toast(e.message);
+            }
+        }
 
         function showEditProfile() {
-            state.view="edit-profile"; const p=state.profile;
+            state.view = "edit-profile"; const p = state.profile;
             setApp(shell(`<div class="feed">
-                <form id="profile-form" class="post"><h3 class="card-title">Edit profile</h3><div class="profile-edit-avatar">${av(p,"avatar avatar-xl")}<label class="follow-button">Change photo<input type="file" id="avatar-input" accept="image/png,image/jpeg,image/webp,image/gif" hidden /></label></div><div id="avatar-preview" class="media-preview"></div><div class="field"><label>Username</label><input class="input" name="username" value="${esc(p.username)}" required /></div><div class="field"><label>Bio</label><textarea class="input" name="bio">${esc(p.bio||"")}</textarea></div><button class="primary-button">Save</button></form>
+                <form id="profile-form" class="post"><h3 class="card-title">Edit profile</h3><div class="profile-edit-avatar">${av(p, "avatar avatar-xl")}<label class="follow-button">Change photo<input type="file" id="avatar-input" accept="image/png,image/jpeg,image/webp,image/gif" hidden /></label></div><div id="avatar-preview" class="media-preview"></div><div class="field"><label>Username</label><input class="input" name="username" value="${esc(p.username)}" required /></div><div class="field"><label>Bio</label><textarea class="input" name="bio">${esc(p.bio || "")}</textarea></div><button class="primary-button">Save</button></form>
                 <form id="password-form" class="post"><h3 class="card-title">Change password</h3><div class="field"><label>Current</label><input class="input" type="password" name="current_password" required /></div><div class="field"><label>New</label><input class="input" type="password" name="new_password" required /></div><div class="field"><label>Confirm</label><input class="input" type="password" name="confirm_password" required /></div><button class="primary-button">Change</button></form>
                 <form id="delete-form" class="post danger-card"><h3 class="card-title">Delete account</h3><div class="field"><label>Password</label><input class="input" type="password" name="password" required /></div><button class="danger-button">Delete forever</button></form>
             </div>`, "profile", "Edit profile", true));
         }
-        function previewAvatar(i) { const p=$("#avatar-preview"); if(!p) return; p.innerHTML = i.files&&i.files[0] ? `<img src="${URL.createObjectURL(i.files[0])}" class="preview-media" />` : ""; }
-        async function saveProfile(f) { const fd=new FormData(f); const ai=$("#avatar-input"); if(ai&&ai.files&&ai.files[0]) fd.append("avatar", ai.files[0]); try { const d=await api("/api/profile/update",{method:"POST",body:fd}); state.profile=d.profile; state.me.username=d.user.username; toast("Saved"); showProfile(state.me.username); } catch(e){toast(e.message);} }
-        async function deleteAccount(f) { if(!confirm("Delete forever?")) return; try { await api("/api/account/delete",{method:"POST",json:{password:f.password.value}}); state.me=null; state.profile=null; state.isAdmin=false; stopNotifPolling(); toast("Deleted"); renderAuth(); } catch(e){toast(e.message);} }
+        function previewAvatar(i) { const p = $("#avatar-preview"); if (!p) return; p.innerHTML = i.files && i.files[0] ? `<img src="${URL.createObjectURL(i.files[0])}" class="preview-media" />` : ""; }
+        async function saveProfile(f) { const fd = new FormData(f); const ai = $("#avatar-input"); if (ai && ai.files && ai.files[0]) fd.append("avatar", ai.files[0]); try { const d = await api("/api/profile/update", { method: "POST", body: fd }); state.profile = d.profile; state.me.username = d.user.username; toast("Saved"); showProfile(state.me.username); } catch (e) { toast(e.message); } }
+        async function deleteAccount(f) { if (!confirm("Delete forever?")) return; try { await api("/api/account/delete", { method: "POST", json: { password: f.password.value } }); state.me = null; state.profile = null; state.isAdmin = false; stopNotifPolling(); toast("Deleted"); renderAuth(); } catch (e) { toast(e.message); } }
 
-        function showSearch() { state.view="search"; setApp(shell(`<div class="search-wrap"><input id="search-input" class="search-bar" placeholder="Search users" /><div id="search-results" class="user-list"></div></div>`, "search", "Search")); $("#search-input").focus(); }
-        async function loadSearch(q) { const r=$("#search-results"); if(!r) return; if(!q){r.innerHTML="";return;} try { const d=await api(`/api/search?q=${encodeURIComponent(q)}`); r.innerHTML = d.users.length ? d.users.map(u=>userRow(u)).join("") : `<div class="empty">No users found.</div>`; } catch(e){toast(e.message);} }
-        function userRow(u, adm=false) { return `<div class="user-row"><button class="user-row-main" data-open-profile="${esc(u.username)}">${av(u)}<div class="author"><div class="author-name">${esc(u.username)}${vBadge(u.verified)}</div><div class="timestamp">@${esc(u.username)}</div></div></button>${adm?`<button class="follow-button" data-verify="${esc(u.id)}">${u.verified?"Unverify":"Verify"}</button>`:""}</div>`; }
+        function showSearch() { state.view = "search"; setApp(shell(`<div class="search-wrap"><input id="search-input" class="search-bar" placeholder="Search users" /><div id="search-results" class="user-list"></div></div>`, "search", "Search")); $("#search-input").focus(); }
+        async function loadSearch(q) { const r = $("#search-results"); if (!r) return; if (!q) { r.innerHTML = ""; return; } try { const d = await api(`/api/search?q=${encodeURIComponent(q)}`); r.innerHTML = d.users.length ? d.users.map(u => userRow(u)).join("") : `<div class="empty">No users found.</div>`; } catch (e) { toast(e.message); } }
+        function userRow(u, adm = false) { return `<div class="user-row"><button class="user-row-main" data-open-profile="${esc(u.username)}">${av(u)}<div class="author"><div class="author-name">${esc(u.username)}${vBadge(u.verified)}</div><div class="timestamp">@${esc(u.username)}</div></div></button>${adm ? `<button class="follow-button" data-verify="${esc(u.id)}">${u.verified ? "Unverify" : "Verify"}</button>` : ""}</div>`; }
 
-        function showAdmin() { if(!state.isAdmin){showFeed();return;} state.view="admin"; setApp(shell(`<div class="search-wrap"><input id="admin-input" class="search-bar" placeholder="Search to verify" /><div id="admin-results" class="user-list"></div></div>`, "admin", "Verify users")); loadAdmin(""); }
-        async function loadAdmin(q) { const r=$("#admin-results"); if(!r) return; try { const d=await api(q?`/api/admin/users?q=${encodeURIComponent(q)}`:`/api/admin/users`); r.innerHTML = d.users.length ? d.users.map(u=>userRow(u,true)).join("") : `<div class="empty">No users found.</div>`; } catch(e){toast(e.message);} }
-        async function toggleVerify(uid) { try { await api(`/api/admin/verify/${uid}`,{method:"POST"}); toast("Updated"); loadAdmin($("#admin-input")?.value.trim()||""); } catch(e){toast(e.message);} }
+        function showAdmin() { if (!state.isAdmin) { showFeed(); return; } state.view = "admin"; setApp(shell(`<div class="search-wrap"><input id="admin-input" class="search-bar" placeholder="Search to verify" /><div id="admin-results" class="user-list"></div></div>`, "admin", "Verify users")); loadAdmin(""); }
+        async function loadAdmin(q) { const r = $("#admin-results"); if (!r) return; try { const d = await api(q ? `/api/admin/users?q=${encodeURIComponent(q)}` : `/api/admin/users`); r.innerHTML = d.users.length ? d.users.map(u => userRow(u, true)).join("") : `<div class="empty">No users found.</div>`; } catch (e) { toast(e.message); } }
+        async function toggleVerify(uid) { try { await api(`/api/admin/verify/${uid}`, { method: "POST" }); toast("Updated"); loadAdmin($("#admin-input")?.value.trim() || ""); } catch (e) { toast(e.message); } }
 
-        async function logout() { try{await api("/api/logout",{method:"POST"});}catch{} state.me=null; state.profile=null; state.isAdmin=false; stopNotifPolling(); renderAuth(); }
-        function copyLink(pid) { navigator.clipboard.writeText(`${location.origin}/#post-${pid}`).then(()=>toast("Copied")).catch(()=>toast("Failed")); }
-        async function handleNav(n) { if(n==="home")showFeed(); else if(n==="search")showSearch(); else if(n==="profile")showProfile(state.me.username); else if(n==="admin")showAdmin(); else if(n==="compose"){if(state.view!=="feed")await showFeed(); setTimeout(()=>$("#composer-text")?.focus(),50);} }
+        async function logout() { try { await api("/api/logout", { method: "POST" }); } catch { } state.me = null; state.profile = null; state.isAdmin = false; stopNotifPolling(); renderAuth(); }
+        function copyLink(pid) { navigator.clipboard.writeText(`${location.origin}/#post-${pid}`).then(() => toast("Copied")).catch(() => toast("Failed")); }
+        async function handleNav(n) { if (n === "home") showFeed(); else if (n === "search") showSearch(); else if (n === "profile") showProfile(state.me.username); else if (n === "admin") showAdmin(); else if (n === "compose") { if (state.view !== "feed") await showFeed(); setTimeout(() => $("#composer-text")?.focus(), 50); } }
 
-        // --------------------------------------------------------------------------
-        // Notifications & Push (FIXED)
-        // --------------------------------------------------------------------------
-        function u8(k){const p="=".repeat((4-k.length%4)%4),b=(k+p).replace(/-/g,"+").replace(/_/g,"/"),r=atob(b),a=new Uint8Array(r.length);for(let i=0;i<r.length;i++)a[i]=r.charCodeAt(i);return a;}
-        
-        async function setupPush() { 
-            if(!("serviceWorker" in navigator)||!("PushManager" in window)) {
-                console.warn("Push not supported in this browser");
-                return; 
-            } 
-            try { 
-                // Register service worker from root scope
-                const reg = await navigator.serviceWorker.register("/sw.js"); 
-                await navigator.serviceWorker.ready; 
-                
-                let perm = Notification.permission; 
-                if(perm === "default") {
-                    perm = await Notification.requestPermission(); 
-                }
-                if(perm !== "granted") {
-                    console.warn("Notification permission not granted");
-                    return; 
-                }
-                
-                const kd = await api("/api/vapid-public-key"); 
-                if(!kd.public_key) {
-                    console.error("VAPID public key missing from server");
-                    return; 
-                }
-                
-                let sub = await reg.pushManager.getSubscription(); 
-                if(!sub) {
-                    sub = await reg.pushManager.subscribe({
-                        userVisibleOnly: true,
-                        applicationServerKey: u8(kd.public_key)
-                    }); 
-                }
-                
-                await api("/api/push/subscribe", {method:"POST", json: sub.toJSON()}); 
-                console.log("Push subscription successful");
-            } catch(e) {
-                console.error("Push setup failed:", e);
-            } 
-        }
-
-        let notifTimer = null; 
-        
-        function startNotifPolling() {
-            stopNotifPolling();
-            pollUnread();
-            // Poll every 15 seconds
-            notifTimer = setInterval(pollUnread, 15000);
-        } 
-        
-        function stopNotifPolling() {
-            if(notifTimer) { clearInterval(notifTimer); notifTimer = null; }
-        } 
-        
-        async function pollUnread() {
-            if(!state.me) return;
+        // ------------------------------------------------------------------
+        // Notifications & Push
+        // ------------------------------------------------------------------
+        function u8(k) { const p = "=".repeat((4 - k.length % 4) % 4), b = (k + p).replace(/-/g, "+").replace(/_/g, "/"), r = atob(b), a = new Uint8Array(r.length); for (let i = 0; i < r.length; i++) a[i] = r.charCodeAt(i); return a; }
+        async function setupPush() {
+            if (!("serviceWorker" in navigator) || !("PushManager" in window)) { console.warn("Push not supported"); return; }
             try {
-                const d = await api("/api/notifications/unread-count");
-                state.unreadCount = d.count || 0;
-                updateBadge();
-            } catch(e) {
-                console.warn("Poll unread failed", e);
-            }
-        } 
-        
+                const reg = await navigator.serviceWorker.register("/sw.js");
+                await navigator.serviceWorker.ready;
+                let perm = Notification.permission;
+                if (perm === "default") perm = await Notification.requestPermission();
+                if (perm !== "granted") { console.warn("Notification permission not granted"); return; }
+                const kd = await api("/api/vapid-public-key");
+                if (!kd.public_key) { console.error("VAPID public key missing from server"); return; }
+                let sub = await reg.pushManager.getSubscription();
+                if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: u8(kd.public_key) });
+                await api("/api/push/subscribe", { method: "POST", json: sub.toJSON() });
+                console.log("Push subscription successful");
+            } catch (e) { console.error("Push setup failed:", e); }
+        }
+
+        let notifTimer = null;
+        function startNotifPolling() { stopNotifPolling(); pollUnread(); notifTimer = setInterval(pollUnread, 15000); }
+        function stopNotifPolling() { if (notifTimer) { clearInterval(notifTimer); notifTimer = null; } }
+        async function pollUnread() { if (!state.me) return; try { const d = await api("/api/notifications/unread-count"); state.unreadCount = d.count || 0; updateBadge(); } catch (e) { console.warn("Poll unread failed", e); } }
         function updateBadge() {
-            // Re-query every time in case the header was re-rendered
             const badge = document.getElementById("notif-badge");
-            if(!badge) return;
-            
-            if(state.unreadCount > 0) {
-                badge.textContent = state.unreadCount > 99 ? "99+" : String(state.unreadCount);
-                badge.style.display = "grid";
-            } else {
-                badge.style.display = "none";
-                badge.textContent = "";
-            }
+            if (!badge) return;
+            if (state.unreadCount > 0) { badge.textContent = state.unreadCount > 99 ? "99+" : String(state.unreadCount); badge.style.display = "grid"; }
+            else { badge.style.display = "none"; badge.textContent = ""; }
         }
-
-        async function showNotifications() { 
-            state.view = "notifications"; 
-            setApp(shell(`<div class="feed"><div id="notif-root">Loading...</div></div>`, "", "Notifications", true)); 
-            try { 
-                const d = await api("/api/notifications"); 
-                const r = $("#notif-root"); 
-                r.innerHTML = d.notifications.length ? d.notifications.map(notifHTML).join("") : `<div class="empty">No notifications yet.</div>`; 
-                await api("/api/notifications/read", {method:"POST"}); 
-                state.unreadCount = 0; 
-                updateBadge(); 
-            } catch(e) { toast(e.message); } 
-        } 
-
-        function notifHTML(n) { 
-            let t = "interacted"; 
-            if(n.type === "reply") t = "replied"; 
-            else if(n.type === "like") t = "liked"; 
-            else if(n.type === "follow") t = "followed you"; 
-            return `<div class="post notif-item ${n.read ? "" : "unread"}" data-action="open-feed"><div class="post-header" style="margin-bottom:0">${av(n.actor)}<div class="author"><div class="author-name"><button class="link" data-open-profile="${esc(n.actor.username)}">${esc(n.actor.username)}</button>${vBadge(n.actor.verified)}</div><div class="timestamp">${ago(n.created_at)} · ${t}</div></div></div></div>`; 
+        async function showNotifications() {
+            state.view = "notifications";
+            setApp(shell(`<div class="feed"><div id="notif-root">Loading...</div></div>`, "", "Notifications", true));
+            try {
+                const d = await api("/api/notifications");
+                const r = $("#notif-root");
+                r.innerHTML = d.notifications.length ? d.notifications.map(notifHTML).join("") : `<div class="empty">No notifications yet.</div>`;
+                await api("/api/notifications/read", { method: "POST" });
+                state.unreadCount = 0; updateBadge();
+            } catch (e) { toast(e.message); }
         }
+        function notifHTML(n) { let t = "interacted"; if (n.type === "reply") t = "replied"; else if (n.type === "like") t = "liked"; else if (n.type === "follow") t = "followed you"; return `<div class="post notif-item ${n.read ? "" : "unread"}" data-action="open-feed"><div class="post-header" style="margin-bottom:0">${av(n.actor)}<div class="author"><div class="author-name"><button class="link" data-open-profile="${esc(n.actor.username)}">${esc(n.actor.username)}</button>${vBadge(n.actor.verified)}</div><div class="timestamp">${ago(n.created_at)} · ${t}</div></div></div></div>`; }
 
         async function init() {
             setupTheme();
-            try { 
-                const d = await api("/api/me"); 
-                if(d.authenticated) {
-                    state.me = d.user;
-                    state.profile = d.profile;
-                    state.isAdmin = d.is_admin;
-                    showFeed();
-                    setupPush();
-                    startNotifPolling();
-                } else {
-                    renderAuth(); 
-                }
-            } catch(e) {
-                console.error("Init failed", e);
-                renderAuth();
-            }
+            try {
+                const d = await api("/api/me");
+                if (d.authenticated) { state.me = d.user; state.profile = d.profile; state.isAdmin = d.is_admin; showFeed(); setupPush(); startNotifPolling(); }
+                else renderAuth();
+            } catch (e) { console.error("Init failed", e); renderAuth(); }
         }
 
         document.addEventListener("click", async e => {
             const a = e.target.closest("[data-action]");
-            if(a){const act=a.dataset.action;if(act==="toggle-theme"){toggleTheme();return;}if(act==="logout"){await logout();return;}if(act==="back"){showFeed();return;}if(act==="edit-profile"){showEditProfile();return;}if(act==="submit-post"){await submitPost();return;}if(act==="auth-mode"){setAuthMode(a.dataset.mode);return;}if(act==="notifications"){showNotifications();return;}if(act==="open-feed"){showFeed();return;}}
-            const dc=e.target.closest("[data-delete-comment]");if(dc){await deleteComment(dc.dataset.deleteComment,dc.dataset.post);return;}
-            const rp=e.target.closest("[data-report-post]");if(rp){await reportPost(rp.dataset.reportPost);return;}
-            const rc=e.target.closest("[data-report-comment]");if(rc){await reportComment(rc.dataset.reportComment);return;}
-            const dp=e.target.closest("[data-delete]");if(dp){await deletePost(dp.dataset.delete);return;}
-            const nv=e.target.closest("[data-nav]");if(nv){await handleNav(nv.dataset.nav);return;}
-            const op=e.target.closest("[data-open-profile]");if(op){showProfile(op.dataset.openProfile);return;}
-            const lk=e.target.closest("[data-like]");if(lk){await toggleLike(lk.dataset.like);return;}
-            const cm=e.target.closest("[data-toggle-comments]");if(cm){await toggleComments(cm.dataset.toggleComments);return;}
-            const sh=e.target.closest("[data-share]");if(sh){copyLink(sh.dataset.share);return;}
-            const fl=e.target.closest("[data-follow]");if(fl){await toggleFollow(fl);return;}
-            const ry=e.target.closest("[data-reply]");if(ry){showReply(ry.dataset.reply,ry.dataset.post);return;}
-            const vr=e.target.closest("[data-verify]");if(vr){await toggleVerify(vr.dataset.verify);return;}
+            if (a) { const act = a.dataset.action; if (act === "toggle-theme") { toggleTheme(); return; } if (act === "logout") { await logout(); return; } if (act === "back") { showFeed(); return; } if (act === "edit-profile") { showEditProfile(); return; } if (act === "submit-post") { await submitPost(); return; } if (act === "auth-mode") { setAuthMode(a.dataset.mode); return; } if (act === "notifications") { showNotifications(); return; } if (act === "open-feed") { showFeed(); return; } }
+            const bl = e.target.closest("[data-block]"); if (bl) { await toggleBlock(bl); return; }
+            const dc = e.target.closest("[data-delete-comment]"); if (dc) { await deleteComment(dc.dataset.deleteComment, dc.dataset.post); return; }
+            const rp = e.target.closest("[data-report-post]"); if (rp) { await reportPost(rp.dataset.reportPost); return; }
+            const rc = e.target.closest("[data-report-comment]"); if (rc) { await reportComment(rc.dataset.reportComment); return; }
+            const dp = e.target.closest("[data-delete]"); if (dp) { await deletePost(dp.dataset.delete); return; }
+            const nv = e.target.closest("[data-nav]"); if (nv) { await handleNav(nv.dataset.nav); return; }
+            const op = e.target.closest("[data-open-profile]"); if (op) { showProfile(op.dataset.openProfile); return; }
+            const lk = e.target.closest("[data-like]"); if (lk) { await toggleLike(lk.dataset.like); return; }
+            const cm = e.target.closest("[data-toggle-comments]"); if (cm) { await toggleComments(cm.dataset.toggleComments); return; }
+            const sh = e.target.closest("[data-share]"); if (sh) { copyLink(sh.dataset.share); return; }
+            const fl = e.target.closest("[data-follow]"); if (fl) { await toggleFollow(fl); return; }
+            const ry = e.target.closest("[data-reply]"); if (ry) { showReply(ry.dataset.reply, ry.dataset.post); return; }
+            const vr = e.target.closest("[data-verify]"); if (vr) { await toggleVerify(vr.dataset.verify); return; }
         });
 
-        document.addEventListener("change", e => { if(e.target.id==="composer-media")previewMedia(e.target); if(e.target.id==="avatar-input")previewAvatar(e.target); });
-        
-        let st=null; 
-        document.addEventListener("input", e => { 
-            if(e.target.id==="search-input"||e.target.id==="admin-input"){
-                clearTimeout(st);
-                st=setTimeout(()=>{
-                    if(e.target.id==="search-input")loadSearch(e.target.value.trim());
-                    else loadAdmin(e.target.value.trim());
-                },250);
-            } 
-        });
+        document.addEventListener("change", e => { if (e.target.id === "composer-media") previewMedia(e.target); if (e.target.id === "avatar-input") previewAvatar(e.target); });
+
+        let st = null;
+        document.addEventListener("input", e => { if (e.target.id === "search-input" || e.target.id === "admin-input") { clearTimeout(st); st = setTimeout(() => { if (e.target.id === "search-input") loadSearch(e.target.value.trim()); else loadAdmin(e.target.value.trim()); }, 250); } });
 
         document.addEventListener("submit", async e => {
-            const f=e.target; e.preventDefault();
-            if(f.id==="auth-form"){await submitAuth(f);return;}
-            if(f.dataset.commentForm!==undefined||f.dataset.replyForm!==undefined){await submitComment(f);return;}
-            if(f.id==="password-form"){await changePassword(f);return;}
-            if(f.id==="profile-form"){await saveProfile(f);return;}
-            if(f.id==="delete-form"){await deleteAccount(f);return;}
+            const f = e.target; e.preventDefault();
+            if (f.id === "auth-form") { await submitAuth(f); return; }
+            if (f.dataset.commentForm !== undefined || f.dataset.replyForm !== undefined) { await submitComment(f); return; }
+            if (f.id === "password-form") { await changePassword(f); return; }
+            if (f.id === "profile-form") { await saveProfile(f); return; }
+            if (f.id === "delete-form") { await deleteAccount(f); return; }
         });
 
         init();
