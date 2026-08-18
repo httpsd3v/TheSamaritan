@@ -109,7 +109,6 @@
                     ${state.me ? bottomNav(a) : ""}
                 </div>`;
             }
-        }
 
         function composer() {
             return `<section class="post composer">
@@ -479,10 +478,21 @@
 
         document.addEventListener("click", async e => {
             const a = e.target.closest("[data-action]");
-            if (act === "voice") { showVoice(); return; }
-            if (act === "voice-mute") { toggleMute(); return; }
-            if (act === "voice-leave") { leaveVoice(); return; }
-            if (a) { const act = a.dataset.action; if (act === "toggle-theme") { toggleTheme(); return; } if (act === "logout") { await logout(); return; } if (act === "back") { showFeed(); return; } if (act === "edit-profile") { showEditProfile(); return; } if (act === "submit-post") { await submitPost(); return; } if (act === "auth-mode") { setAuthMode(a.dataset.mode); return; } if (act === "notifications") { showNotifications(); return; } if (act === "open-feed") { showFeed(); return; } }
+            if (a) { 
+                const act = a.dataset.action; 
+                if (act === "voice") { showVoice(); return; }
+                if (act === "voice-mute") { toggleMute(); return; }
+                if (act === "voice-leave") { leaveVoice(); return; }
+                if (act === "toggle-theme") { toggleTheme(); return; } 
+                if (act === "logout") { await logout(); return; } 
+                if (act === "back") { showFeed(); return; } 
+                if (act === "edit-profile") { showEditProfile(); return; } 
+                if (act === "submit-post") { await submitPost(); return; } 
+                if (act === "auth-mode") { setAuthMode(a.dataset.mode); return; } 
+                if (act === "notifications") { showNotifications(); return; } 
+                if (act === "open-feed") { showFeed(); return; } 
+            }
+            
             const bn = e.target.closest("[data-ban]"); if (bn) { await toggleBan(bn); return; }
             const bl = e.target.closest("[data-block]"); if (bl) { await toggleBlock(bl); return; }
             const dc = e.target.closest("[data-delete-comment]"); if (dc) { await deleteComment(dc.dataset.deleteComment, dc.dataset.post); return; }
@@ -497,6 +507,7 @@
             const fl = e.target.closest("[data-follow]"); if (fl) { await toggleFollow(fl); return; }
             const ry = e.target.closest("[data-reply]"); if (ry) { showReply(ry.dataset.reply, ry.dataset.post); return; }
             const vr = e.target.closest("[data-verify]"); if (vr) { await toggleVerify(vr.dataset.verify); return; }
+            
             const jv = e.target.closest("[data-join-voice]");
             if (jv) {
                 const id = jv.dataset.joinVoice;
