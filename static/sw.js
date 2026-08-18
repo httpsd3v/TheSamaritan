@@ -1,46 +1,13 @@
-self.addEventListener("push", (event) => {
-    let data = {
-        title: "The Samaritan",
-        body: "You have a new notification.",
-        icon: "/static/icon.png",
-        url: "/",
-    };
-
-    try {
-        if (event.data) {
-            data = event.data.json();
-        }
-    } catch (e) {
-        // Use defaults
-    }
-
-    const options = {
-        body: data.body,
-        icon: data.icon,
-        badge: data.icon,
-        data: { url: data.url },
-        vibrate: [100, 50, 100],
-    };
-
-    event.waitUntil(self.registration.showNotification(data.title, options));
+self.addEventListener("push", e => {
+    let d = { title: "The Samaritan", body: "New notification", url: "/" };
+    if (e.data) try { d = { ...d, ...e.data.json() }; } catch {}
+    e.waitUntil(self.registration.showNotification(d.title, { body: d.body, data: { url: d.url } }));
 });
-
-self.addEventListener("notificationclick", (event) => {
-    event.notification.close();
-
-    const url = event.notification.data?.url || "/";
-
-    event.waitUntil(
-        clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
-            for (const client of list) {
-                if (client.url.includes(url) && "focus" in client) {
-                    return client.focus();
-                }
-            }
-
-            if (clients.openWindow) {
-                return clients.openWindow(url);
-            }
-        })
-    );
+self.addEventListener("notificationclick", e => {
+    e.notification.close();
+    const u = (e.notification.data && e.notification.data.url) || "/";
+    e.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(list => {
+        for (const c of list) if ("focus" in c) return c.focus();
+        if (clients.openWindow) return clients.openWindow(u);
+    }));
 });
