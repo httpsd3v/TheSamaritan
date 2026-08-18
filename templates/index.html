@@ -175,16 +175,29 @@
         function showReply(cid, pid) { const h=document.getElementById(`reply-form-${cid}`); if(!h) return; if(h.innerHTML.trim()){h.innerHTML="";return;} h.innerHTML=`<form class="comment-form" data-reply-form="${esc(pid)}" data-parent="${esc(cid)}"><input name="content" placeholder="Reply..." maxlength="500" required /><button>Reply</button></form>`; h.querySelector("input").focus(); }
         async function submitComment(f) { const pid=f.dataset.commentForm||f.dataset.replyForm, par=f.dataset.parent||null, inp=f.querySelector(`input[name="content"]`), txt=inp.value.trim(); if(!txt) return; try { await api(`/api/posts/${pid}/comments`,{method:"POST",json:{content:txt,parent_id:par}}); f.reset(); await loadComments(pid); } catch(e){toast(e.message);} }
 
-        async function showProfile(uname=null) {
-            const u=uname||state.me.username; state.view="profile";
+        async function showProfile(uname = null) {
+            const u = uname || state.me.username;
+            state.view = "profile";
+        
             setApp(shell(
                 `<div class="feed"><div id="profile-root">Loading...</div></div>`,
                 u === state.me.username ? "profile" : "",
                 `@${u}`,
                 u !== state.me.username
             ));
-            try { const d=await api(`/api/profile/${encodeURIComponent(u)}`); state.profileData=d; const r=$("#profile-root"); r.innerHTML=`${profileHeader(d)}<div class="section-title">Posts</div>${d.posts.length?d.posts.map(postHTML).join(""):`<div class="empty">No posts yet.</div>`}`; } catch(e){toast(e.message);const r=$("#profile-root");if(r)r.innerHTML=`<div class="empty">Could not load.</div>`;}
+        
+            try {
+                const d = await api(`/api/profile/${encodeURIComponent(u)}`);
+                state.profileData = d;
+                const r = $("#profile-root");
+                r.innerHTML = `${profileHeader(d)}<div class="section-title">Posts</div>${d.posts.length ? d.posts.map(postHTML).join("") : `<div class="empty">No posts yet.</div>`}`;
+            } catch (e) {
+                toast(e.message);
+                const r = $("#profile-root");
+                if (r) r.innerHTML = `<div class="empty">Could not load.</div>`;
+            }
         }
+        
         function profileHeader(d) {
             const p=d.profile;
             return `<section class="post profile-card"><div class="profile-top">${av(p,"avatar avatar-xl")}<div class="profile-actions">${d.is_me?`<button class="follow-button" data-action="edit-profile">Edit profile</button>`:`<button class="follow-button" data-follow="${esc(p.id)}" data-following="${d.is_following}">${d.is_following?"Following":"Follow"}</button>`}</div></div><div class="profile-name">${esc(p.username)}${vBadge(p.verified)}</div><div class="profile-handle">@${esc(p.username)}</div>${p.bio?`<p class="profile-bio">${fmt(p.bio)}</p>`:""}<div class="profile-stats"><div class="stat"><span class="stat-value">${d.followers}</span><span class="stat-label">Followers</span></div><div class="stat"><span class="stat-value">${d.following}</span><span class="stat-label">Following</span></div><div class="stat"><span class="stat-value">${d.posts.length}</span><span class="stat-label">Posts</span></div></div></section>`;
