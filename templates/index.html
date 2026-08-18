@@ -177,7 +177,12 @@
 
         async function showProfile(uname=null) {
             const u=uname||state.me.username; state.view="profile";
-            setApp(shell(`<div class="feed"><div id="profile-root">Loading...</div></div>`, u===state.me.username?"profile":`@${u}`, u!==state.me.username));
+            setApp(shell(
+                `<div class="feed"><div id="profile-root">Loading...</div></div>`,
+                u === state.me.username ? "profile" : "",
+                `@${u}`,
+                u !== state.me.username
+            ));
             try { const d=await api(`/api/profile/${encodeURIComponent(u)}`); state.profileData=d; const r=$("#profile-root"); r.innerHTML=`${profileHeader(d)}<div class="section-title">Posts</div>${d.posts.length?d.posts.map(postHTML).join(""):`<div class="empty">No posts yet.</div>`}`; } catch(e){toast(e.message);const r=$("#profile-root");if(r)r.innerHTML=`<div class="empty">Could not load.</div>`;}
         }
         function profileHeader(d) {
