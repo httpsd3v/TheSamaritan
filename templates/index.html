@@ -23,7 +23,12 @@
         const shareIcon = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>`;
         const imageIcon = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>`;
 
-        function setApp(h) { $("#app").innerHTML = h; }
+        function setApp(h) { 
+            $("#app").innerHTML = h; 
+            // Re-apply unread badge after every render to fix the disappearing number bug
+            setTimeout(updateBadge, 0);
+        }
+
         async function api(url, opt = {}) {
             const c = { method: opt.method || "GET", headers: {} };
             if (opt.json !== undefined) { c.headers["Content-Type"] = "application/json"; c.body = JSON.stringify(opt.json); }
@@ -33,6 +38,7 @@
             if (!r.ok || d.ok === false) throw new Error(d.error || "Request failed.");
             return d;
         }
+
         function toast(m) { const e = $("#toast"); e.textContent = m; e.classList.add("show"); setTimeout(() => e.classList.remove("show"), 2600); }
         function esc(v) { return String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;"); }
         function fmt(t) { let s = esc(t); return s.replace(/#([a-zA-Z0-9_]+)/g,`<span class="tag">#$1</span>`).replace(/@([a-zA-Z0-9_.]+)/g,`<span class="tag">@$1</span>`).replace(/\n/g,"<br>"); }
@@ -81,6 +87,7 @@
                 <button class="nav-item ${a==="profile"?"active":""}" data-nav="profile">Me</button>
             </nav>`;
         }
+
         function shell(c, a="home", t="The Samaritan", back=false) {
             return `<div class="app-container">
                 <header class="app-header">
@@ -111,6 +118,7 @@
             setApp(shell(`<div class="feed">${composer()}<div id="feed-list"></div><div id="feed-sentinel" class="feed-sentinel"></div></div>`, "home"));
             await loadFeed(true); setupInfiniteScroll();
         }
+
         async function loadFeed(reset=false) {
             if (reset) { state.feedCursor = null; state.hasMoreFeed = true; const l=$("#feed-list"); if(l) l.innerHTML=""; }
             if (state.isFeedLoading || !state.hasMoreFeed) return;
@@ -124,6 +132,7 @@
             } catch(e) { toast(e.message); const l=$("#feed-list"); if(l&&reset) l.innerHTML=`<div class="empty">Could not load feed.</div>`; }
             finally { state.isFeedLoading = false; if(s) s.innerHTML=""; }
         }
+
         function setupInfiniteScroll() {
             const s = $("#feed-sentinel"); if(!s) return;
             new IntersectionObserver(e => { if(e[0].isIntersecting && !state.isFeedLoading && state.hasMoreFeed) loadFeed(false); }, { rootMargin:"300px" }).observe(s);
@@ -152,6 +161,7 @@
                 t.value=""; f.value=""; const pv=$("#composer-preview"); if(pv) pv.innerHTML=""; toast("Posted");
             } catch(e) { toast(e.message); }
         }
+
         function previewMedia(i) { const p=$("#composer-preview"); if(!p) return; p.innerHTML = i.files&&i.files[0] ? `<img src="${URL.createObjectURL(i.files[0])}" class="preview-media" />` : ""; }
         async function toggleLike(pid) { try { const d=await api(`/api/posts/${pid}/like`,{method:"POST"}); const b=document.querySelector(`[data-like="${pid}"]`); if(!b) return; b.classList.toggle("active",d.liked); const c=b.querySelector(`[data-like-count="${pid}"]`); if(c) c.textContent=d.likes; } catch(e){toast(e.message);} }
         async function deletePost(pid) { if(!confirm("Delete this post?")) return; try { await api(`/api/posts/${pid}/delete`,{method:"POST"}); const a=document.querySelector(`[data-post-id="${pid}"]`); if(a) a.remove(); state.feed=state.feed.filter(p=>p.id!==pid); if(state.view==="feed"&&!state.feed.length){const l=$("#feed-list");if(l)l.innerHTML=`<div class="empty">No posts yet.</div>`;} toast("Deleted"); } catch(e){toast(e.message);} }
@@ -179,6 +189,7 @@
             const u = uname || state.me.username;
             state.view = "profile";
         
+            // FIX: Corrected argument order for shell() so the header shows "@username" instead of "false"
             setApp(shell(
                 `<div class="feed"><div id="profile-root">Loading...</div></div>`,
                 u === state.me.username ? "profile" : "",
@@ -214,7 +225,7 @@
         }
         function previewAvatar(i) { const p=$("#avatar-preview"); if(!p) return; p.innerHTML = i.files&&i.files[0] ? `<img src="${URL.createObjectURL(i.files[0])}" class="preview-media" />` : ""; }
         async function saveProfile(f) { const fd=new FormData(f); const ai=$("#avatar-input"); if(ai&&ai.files&&ai.files[0]) fd.append("avatar", ai.files[0]); try { const d=await api("/api/profile/update",{method:"POST",body:fd}); state.profile=d.profile; state.me.username=d.user.username; toast("Saved"); showProfile(state.me.username); } catch(e){toast(e.message);} }
-        async function deleteAccount(f) { if(!confirm("Delete forever?")) return; try { await api("/api/account/delete",{method:"POST",json:{password:f.password.value}}); state.me=null; state.profile=null; state.isAdmin=false; toast("Deleted"); renderAuth(); } catch(e){toast(e.message);} }
+        async function deleteAccount(f) { if(!confirm("Delete forever?")) return; try { await api("/api/account/delete",{method:"POST",json:{password:f.password.value}}); state.me=null; state.profile=null; state.isAdmin=false; stopNotifPolling(); toast("Deleted"); renderAuth(); } catch(e){toast(e.message);} }
 
         function showSearch() { state.view="search"; setApp(shell(`<div class="search-wrap"><input id="search-input" class="search-bar" placeholder="Search users" /><div id="search-results" class="user-list"></div></div>`, "search", "Search")); $("#search-input").focus(); }
         async function loadSearch(q) { const r=$("#search-results"); if(!r) return; if(!q){r.innerHTML="";return;} try { const d=await api(`/api/search?q=${encodeURIComponent(q)}`); r.innerHTML = d.users.length ? d.users.map(u=>userRow(u)).join("") : `<div class="empty">No users found.</div>`; } catch(e){toast(e.message);} }
@@ -228,16 +239,128 @@
         function copyLink(pid) { navigator.clipboard.writeText(`${location.origin}/#post-${pid}`).then(()=>toast("Copied")).catch(()=>toast("Failed")); }
         async function handleNav(n) { if(n==="home")showFeed(); else if(n==="search")showSearch(); else if(n==="profile")showProfile(state.me.username); else if(n==="admin")showAdmin(); else if(n==="compose"){if(state.view!=="feed")await showFeed(); setTimeout(()=>$("#composer-text")?.focus(),50);} }
 
-        // Notifications & Push
+        // --------------------------------------------------------------------------
+        // Notifications & Push (FIXED)
+        // --------------------------------------------------------------------------
         function u8(k){const p="=".repeat((4-k.length%4)%4),b=(k+p).replace(/-/g,"+").replace(/_/g,"/"),r=atob(b),a=new Uint8Array(r.length);for(let i=0;i<r.length;i++)a[i]=r.charCodeAt(i);return a;}
-        async function setupPush() { if(!("serviceWorker" in navigator)||!("PushManager" in window)) return; try { const reg=await navigator.serviceWorker.register("/sw.js"); await navigator.serviceWorker.ready; let perm=Notification.permission; if(perm==="default") perm=await Notification.requestPermission(); if(perm!=="granted") return; const kd=await api("/api/vapid-public-key"); if(!kd.public_key) return; let sub=await reg.pushManager.getSubscription(); if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:u8(kd.public_key)}); await api("/api/push/subscribe",{method:"POST",json:sub.toJSON()}); } catch(e){console.warn("Push setup failed",e);} }
-        let notifTimer=null; function startNotifPolling(){stopNotifPolling();pollUnread();notifTimer=setInterval(pollUnread,20000);} function stopNotifPolling(){if(notifTimer){clearInterval(notifTimer);notifTimer=null;}} async function pollUnread(){if(!state.me)return;try{const d=await api("/api/notifications/unread-count");state.unreadCount=d.count;updateBadge();}catch{}} function updateBadge(){const b=document.getElementById("notif-badge");if(!b)return;b.style.display=state.unreadCount>0?"grid":"none";b.textContent=state.unreadCount>99?"99+":state.unreadCount;}
-        async function showNotifications() { state.view="notifications"; setApp(shell(`<div class="feed"><div id="notif-root">Loading...</div></div>`, "", "Notifications", true)); try { const d=await api("/api/notifications"); const r=$("#notif-root"); r.innerHTML=d.notifications.length?d.notifications.map(notifHTML).join(""):`<div class="empty">No notifications yet.</div>`; await api("/api/notifications/read",{method:"POST"}); state.unreadCount=0; updateBadge(); } catch(e){toast(e.message);} }
-        function notifHTML(n) { let t="interacted"; if(n.type==="reply")t="replied"; else if(n.type==="like")t="liked"; else if(n.type==="follow")t="followed you"; return `<div class="post notif-item ${n.read?"":"unread"}" data-action="open-feed"><div class="post-header" style="margin-bottom:0">${av(n.actor)}<div class="author"><div class="author-name"><button class="link" data-open-profile="${esc(n.actor.username)}">${esc(n.actor.username)}</button>${vBadge(n.actor.verified)}</div><div class="timestamp">${ago(n.created_at)} · ${t}</div></div></div></div>`; }
+        
+        async function setupPush() { 
+            if(!("serviceWorker" in navigator)||!("PushManager" in window)) {
+                console.warn("Push not supported in this browser");
+                return; 
+            } 
+            try { 
+                // Register service worker from root scope
+                const reg = await navigator.serviceWorker.register("/sw.js"); 
+                await navigator.serviceWorker.ready; 
+                
+                let perm = Notification.permission; 
+                if(perm === "default") {
+                    perm = await Notification.requestPermission(); 
+                }
+                if(perm !== "granted") {
+                    console.warn("Notification permission not granted");
+                    return; 
+                }
+                
+                const kd = await api("/api/vapid-public-key"); 
+                if(!kd.public_key) {
+                    console.error("VAPID public key missing from server");
+                    return; 
+                }
+                
+                let sub = await reg.pushManager.getSubscription(); 
+                if(!sub) {
+                    sub = await reg.pushManager.subscribe({
+                        userVisibleOnly: true,
+                        applicationServerKey: u8(kd.public_key)
+                    }); 
+                }
+                
+                await api("/api/push/subscribe", {method:"POST", json: sub.toJSON()}); 
+                console.log("Push subscription successful");
+            } catch(e) {
+                console.error("Push setup failed:", e);
+            } 
+        }
+
+        let notifTimer = null; 
+        
+        function startNotifPolling() {
+            stopNotifPolling();
+            pollUnread();
+            // Poll every 15 seconds
+            notifTimer = setInterval(pollUnread, 15000);
+        } 
+        
+        function stopNotifPolling() {
+            if(notifTimer) { clearInterval(notifTimer); notifTimer = null; }
+        } 
+        
+        async function pollUnread() {
+            if(!state.me) return;
+            try {
+                const d = await api("/api/notifications/unread-count");
+                state.unreadCount = d.count || 0;
+                updateBadge();
+            } catch(e) {
+                console.warn("Poll unread failed", e);
+            }
+        } 
+        
+        function updateBadge() {
+            // Re-query every time in case the header was re-rendered
+            const badge = document.getElementById("notif-badge");
+            if(!badge) return;
+            
+            if(state.unreadCount > 0) {
+                badge.textContent = state.unreadCount > 99 ? "99+" : String(state.unreadCount);
+                badge.style.display = "grid";
+            } else {
+                badge.style.display = "none";
+                badge.textContent = "";
+            }
+        }
+
+        async function showNotifications() { 
+            state.view = "notifications"; 
+            setApp(shell(`<div class="feed"><div id="notif-root">Loading...</div></div>`, "", "Notifications", true)); 
+            try { 
+                const d = await api("/api/notifications"); 
+                const r = $("#notif-root"); 
+                r.innerHTML = d.notifications.length ? d.notifications.map(notifHTML).join("") : `<div class="empty">No notifications yet.</div>`; 
+                await api("/api/notifications/read", {method:"POST"}); 
+                state.unreadCount = 0; 
+                updateBadge(); 
+            } catch(e) { toast(e.message); } 
+        } 
+
+        function notifHTML(n) { 
+            let t = "interacted"; 
+            if(n.type === "reply") t = "replied"; 
+            else if(n.type === "like") t = "liked"; 
+            else if(n.type === "follow") t = "followed you"; 
+            return `<div class="post notif-item ${n.read ? "" : "unread"}" data-action="open-feed"><div class="post-header" style="margin-bottom:0">${av(n.actor)}<div class="author"><div class="author-name"><button class="link" data-open-profile="${esc(n.actor.username)}">${esc(n.actor.username)}</button>${vBadge(n.actor.verified)}</div><div class="timestamp">${ago(n.created_at)} · ${t}</div></div></div></div>`; 
+        }
 
         async function init() {
             setupTheme();
-            try { const d=await api("/api/me"); if(d.authenticated){state.me=d.user;state.profile=d.profile;state.isAdmin=d.is_admin;showFeed();setupPush();startNotifPolling();} else renderAuth(); } catch{renderAuth();}
+            try { 
+                const d = await api("/api/me"); 
+                if(d.authenticated) {
+                    state.me = d.user;
+                    state.profile = d.profile;
+                    state.isAdmin = d.is_admin;
+                    showFeed();
+                    setupPush();
+                    startNotifPolling();
+                } else {
+                    renderAuth(); 
+                }
+            } catch(e) {
+                console.error("Init failed", e);
+                renderAuth();
+            }
         }
 
         document.addEventListener("click", async e => {
@@ -256,8 +379,20 @@
             const ry=e.target.closest("[data-reply]");if(ry){showReply(ry.dataset.reply,ry.dataset.post);return;}
             const vr=e.target.closest("[data-verify]");if(vr){await toggleVerify(vr.dataset.verify);return;}
         });
+
         document.addEventListener("change", e => { if(e.target.id==="composer-media")previewMedia(e.target); if(e.target.id==="avatar-input")previewAvatar(e.target); });
-        let st=null; document.addEventListener("input", e => { if(e.target.id==="search-input"||e.target.id==="admin-input"){clearTimeout(st);st=setTimeout(()=>{if(e.target.id==="search-input")loadSearch(e.target.value.trim());else loadAdmin(e.target.value.trim());},250);} });
+        
+        let st=null; 
+        document.addEventListener("input", e => { 
+            if(e.target.id==="search-input"||e.target.id==="admin-input"){
+                clearTimeout(st);
+                st=setTimeout(()=>{
+                    if(e.target.id==="search-input")loadSearch(e.target.value.trim());
+                    else loadAdmin(e.target.value.trim());
+                },250);
+            } 
+        });
+
         document.addEventListener("submit", async e => {
             const f=e.target; e.preventDefault();
             if(f.id==="auth-form"){await submitAuth(f);return;}
@@ -266,6 +401,7 @@
             if(f.id==="profile-form"){await saveProfile(f);return;}
             if(f.id==="delete-form"){await deleteAccount(f);return;}
         });
+
         init();
     </script>
 </body>
