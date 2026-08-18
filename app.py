@@ -521,13 +521,29 @@ def api_vapid_key(): return ok(public_key=VAPID_PUBLIC_KEY)
 def api_push_subscribe():
     d = request.get_json(silent=True) or {}
     ep, keys = d.get("endpoint"), d.get("keys") or {}
-    if not ep or not keys.get("p256dh") or not keys.get("auth"): return err("Invalid subscription.")
+    
+    if not ep or not keys.get("p256dh") or not keys.get("auth"): 
+        return err("Invalid subscription.")
+    
     try:
-        ex = db.table("push_subscriptions").select("id").eq("endpoint", ep).eq("user_id", session["user_id"]).limit(1).execute().data
-        if ex: db.table("push_subscriptions").update({"p256dh": keys["p256dh"], "auth": keys["auth"]}).eq("id", ex[0]["id"]).execute()
-        else: db.table("push_subscriptions").insert({"user_id": session["user_id"], "endpoint": ep, "p256dh": keys["p256dh"], "auth": keys["auth"]}).execute()
+        # Use upsert to handle duplicates gracefully
+        # If the endpoint exists for this user, update the keys.
+        # If not, insert a new row.
+        db.table("push_subscriptions").upsert(
+            {
+                "user_id": session["user_id"],
+                "endpoint": ep,
+                "p256dh": keys["p256dh"],
+                "auth": keys["auth"]
+            },
+            on_conflict="endpoint"  # This matches your unique constraint
+        ).execute()
+        
         return ok()
-    except Exception as e: app.logger.error(f"Push subscribe failed: {e}"); return err("Could not save.", 500)
+    except Exception as e: 
+        app.logger.error(f"Push subscribe failed: {e}")
+        return err("Could not save.", 500)
+        
 
 @app.route("/api/notifications")
 @login_required_api
