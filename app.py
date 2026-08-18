@@ -563,8 +563,14 @@ def sw_js():
     r.headers["Service-Worker-Allowed"] = "/"
     return r
 
-@app.route("/favicon.ico") def favicon(): return "", 204
-@app.route("/health") def health(): return "ok", 200
+@app.route("/favicon.ico")
+def favicon():
+    return "", 204
+
+
+@app.route("/health")
+def health():
+    return "ok", 200
 
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
