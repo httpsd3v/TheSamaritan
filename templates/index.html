@@ -34,6 +34,10 @@
             else if (opt.body !== undefined) c.body = opt.body;
             const r = await fetch(url, c); let d = {};
             try { d = await r.json(); } catch { d = { ok: false, error: "Server error." }; }
+            if (r.status === 401 && state.me) {
+                state.me = null; state.profile = null; state.isAdmin = false;
+                stopNotifPolling(); renderAuth();
+            }
             if (!r.ok || d.ok === false) throw new Error(d.error || "Request failed.");
             return d;
         }
@@ -46,6 +50,7 @@
         function av(p, cls = "avatar") { return p.avatar_url ? `<img class="${cls}" src="${esc(p.avatar_url)}" alt="" loading="lazy" />` : `<div class="${cls} avatar-fallback">${esc((p.username || "?")[0].toUpperCase())}</div>`; }
         function canDelPost(p) { return state.me && p && p.author && (state.isAdmin || p.author.id === state.me.id); }
         function canDelComment(c) { return state.me && c && c.author && (state.isAdmin || c.author.id === state.me.id || c.post_author_id === state.me.id); }
+        function isBanned(u) { return u && u.banned_until && new Date(u.banned_until) > new Date(); }
 
         function setupTheme() { document.documentElement.dataset.theme = localStorage.getItem("samaritan-theme") === "light" ? "light" : "dark"; }
         function toggleTheme() { const n = document.documentElement.dataset.theme === "dark" ? "light" : "dark"; document.documentElement.dataset.theme = n; localStorage.setItem("samaritan-theme", n); toast(`${n === "dark" ? "Dark" : "Light"} mode`); }
@@ -163,17 +168,14 @@
 
         function previewMedia(i) { const p = $("#composer-preview"); if (!p) return; p.innerHTML = i.files && i.files[0] ? `<img src="${URL.createObjectURL(i.files[0])}" class="preview-media" />` : ""; }
 
-        // OPTIMISTIC LIKE: instant UI, revert on failure
         async function toggleLike(pid) {
             const b = document.querySelector(`[data-like="${pid}"]`);
             if (!b) return;
             const countSpan = b.querySelector(`[data-like-count="${pid}"]`);
             const wasLiked = b.classList.contains("active");
             const currentCount = parseInt(countSpan?.textContent || "0");
-
             b.classList.toggle("active", !wasLiked);
             if (countSpan) countSpan.textContent = wasLiked ? currentCount - 1 : currentCount + 1;
-
             try {
                 const d = await api(`/api/posts/${pid}/like`, { method: "POST" });
                 b.classList.toggle("active", d.liked);
@@ -233,7 +235,6 @@
             return `<section class="post profile-card"><div class="profile-top">${av(p, "avatar avatar-xl")}<div class="profile-actions">${d.is_me ? `<button class="follow-button" data-action="edit-profile">Edit profile</button>` : `<button class="follow-button" data-follow="${esc(p.id)}" data-following="${d.is_following}">${d.is_following ? "Following" : "Follow"}</button>${blockBtn}`}</div></div><div class="profile-name">${esc(p.username)}${vBadge(p.verified)}</div><div class="profile-handle">@${esc(p.username)}</div>${p.bio ? `<p class="profile-bio">${fmt(p.bio)}</p>` : ""}<div class="profile-stats"><div class="stat"><span class="stat-value">${d.followers}</span><span class="stat-label">Followers</span></div><div class="stat"><span class="stat-value">${d.following}</span><span class="stat-label">Following</span></div><div class="stat"><span class="stat-value">${d.posts.length}</span><span class="stat-label">Posts</span></div></div></section>`;
         }
 
-        // OPTIMISTIC FOLLOW: instant UI, revert on failure
         async function toggleFollow(b) {
             const uid = b.dataset.follow;
             const wasFollowing = b.dataset.following === "true";
@@ -251,7 +252,6 @@
             }
         }
 
-        // OPTIMISTIC BLOCK: instant UI, revert on failure
         async function toggleBlock(b) {
             const uid = b.dataset.block;
             const wasBlocked = b.textContent === "Blocked";
@@ -268,6 +268,23 @@
             }
         }
 
+        async function toggleBan(b) {
+            const uid = b.dataset.ban;
+            const wasBanned = b.textContent === "Unban";
+            let hours = 0;
+            if (!wasBanned) {
+                const inp = prompt("Ban for how many hours?");
+                if (inp === null) return;
+                hours = parseFloat(inp);
+                if (isNaN(hours) || hours <= 0) { toast("Enter a valid number of hours"); return; }
+            }
+            try {
+                const d = await api(`/api/admin/ban/${uid}`, { method: "POST", json: { hours } });
+                toast(d.banned_until ? `Banned for ${hours}h` : "Unbanned");
+                loadAdmin($("#admin-input")?.value.trim() || "");
+            } catch (e) { toast(e.message); }
+        }
+
         function showEditProfile() {
             state.view = "edit-profile"; const p = state.profile;
             setApp(shell(`<div class="feed">
@@ -282,9 +299,14 @@
 
         function showSearch() { state.view = "search"; setApp(shell(`<div class="search-wrap"><input id="search-input" class="search-bar" placeholder="Search users" /><div id="search-results" class="user-list"></div></div>`, "search", "Search")); $("#search-input").focus(); }
         async function loadSearch(q) { const r = $("#search-results"); if (!r) return; if (!q) { r.innerHTML = ""; return; } try { const d = await api(`/api/search?q=${encodeURIComponent(q)}`); r.innerHTML = d.users.length ? d.users.map(u => userRow(u)).join("") : `<div class="empty">No users found.</div>`; } catch (e) { toast(e.message); } }
-        function userRow(u, adm = false) { return `<div class="user-row"><button class="user-row-main" data-open-profile="${esc(u.username)}">${av(u)}<div class="author"><div class="author-name">${esc(u.username)}${vBadge(u.verified)}</div><div class="timestamp">@${esc(u.username)}</div></div></button>${adm ? `<button class="follow-button" data-verify="${esc(u.id)}">${u.verified ? "Unverify" : "Verify"}</button>` : ""}</div>`; }
 
-        function showAdmin() { if (!state.isAdmin) { showFeed(); return; } state.view = "admin"; setApp(shell(`<div class="search-wrap"><input id="admin-input" class="search-bar" placeholder="Search to verify" /><div id="admin-results" class="user-list"></div></div>`, "admin", "Verify users")); loadAdmin(""); }
+        function userRow(u, adm = false) {
+            const banned = isBanned(u);
+            const adminBtns = adm ? `<span style="display:flex;gap:6px;flex-shrink:0"><button class="follow-button" data-verify="${esc(u.id)}">${u.verified ? "Unverify" : "Verify"}</button><button class="follow-button" data-ban="${esc(u.id)}" style="${banned ? "border-color: var(--text);" : ""}">${banned ? "Unban" : "Ban"}</button></span>` : "";
+            return `<div class="user-row"><button class="user-row-main" data-open-profile="${esc(u.username)}">${av(u)}<div class="author"><div class="author-name">${esc(u.username)}${vBadge(u.verified)}${banned ? `<span class="tag"> · banned</span>` : ""}</div><div class="timestamp">@${esc(u.username)}</div></div></button>${adminBtns}</div>`;
+        }
+
+        function showAdmin() { if (!state.isAdmin) { showFeed(); return; } state.view = "admin"; setApp(shell(`<div class="search-wrap"><input id="admin-input" class="search-bar" placeholder="Search to verify or ban" /><div id="admin-results" class="user-list"></div></div>`, "admin", "Verify users")); loadAdmin(""); }
         async function loadAdmin(q) { const r = $("#admin-results"); if (!r) return; try { const d = await api(q ? `/api/admin/users?q=${encodeURIComponent(q)}` : `/api/admin/users`); r.innerHTML = d.users.length ? d.users.map(u => userRow(u, true)).join("") : `<div class="empty">No users found.</div>`; } catch (e) { toast(e.message); } }
         async function toggleVerify(uid) { try { await api(`/api/admin/verify/${uid}`, { method: "POST" }); toast("Updated"); loadAdmin($("#admin-input")?.value.trim() || ""); } catch (e) { toast(e.message); } }
 
@@ -296,6 +318,8 @@
         // Notifications & Push
         // ------------------------------------------------------------------
         function u8(k) { const p = "=".repeat((4 - k.length % 4) % 4), b = (k + p).replace(/-/g, "+").replace(/_/g, "/"), r = atob(b), a = new Uint8Array(r.length); for (let i = 0; i < r.length; i++) a[i] = r.charCodeAt(i); return a; }
+        function b64url(bytes) { let s = ""; bytes.forEach(b => s += String.fromCharCode(b)); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+
         async function setupPush() {
             if (!("serviceWorker" in navigator) || !("PushManager" in window)) { console.warn("Push not supported"); return; }
             try {
@@ -306,7 +330,20 @@
                 if (perm !== "granted") { console.warn("Notification permission not granted"); return; }
                 const kd = await api("/api/vapid-public-key");
                 if (!kd.public_key) { console.error("VAPID public key missing from server"); return; }
+
                 let sub = await reg.pushManager.getSubscription();
+                if (sub) {
+                    let existingKey = "";
+                    try {
+                        const buf = sub.options && sub.options.applicationServerKey;
+                        if (buf) existingKey = b64url(new Uint8Array(buf));
+                    } catch (e) { }
+                    if (existingKey && existingKey !== kd.public_key) {
+                        console.warn("VAPID key changed, re-subscribing");
+                        await sub.unsubscribe();
+                        sub = null;
+                    }
+                }
                 if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: u8(kd.public_key) });
                 await api("/api/push/subscribe", { method: "POST", json: sub.toJSON() });
                 console.log("Push subscription successful");
@@ -348,6 +385,7 @@
         document.addEventListener("click", async e => {
             const a = e.target.closest("[data-action]");
             if (a) { const act = a.dataset.action; if (act === "toggle-theme") { toggleTheme(); return; } if (act === "logout") { await logout(); return; } if (act === "back") { showFeed(); return; } if (act === "edit-profile") { showEditProfile(); return; } if (act === "submit-post") { await submitPost(); return; } if (act === "auth-mode") { setAuthMode(a.dataset.mode); return; } if (act === "notifications") { showNotifications(); return; } if (act === "open-feed") { showFeed(); return; } }
+            const bn = e.target.closest("[data-ban]"); if (bn) { await toggleBan(bn); return; }
             const bl = e.target.closest("[data-block]"); if (bl) { await toggleBlock(bl); return; }
             const dc = e.target.closest("[data-delete-comment]"); if (dc) { await deleteComment(dc.dataset.deleteComment, dc.dataset.post); return; }
             const rp = e.target.closest("[data-report-post]"); if (rp) { await reportPost(rp.dataset.reportPost); return; }
