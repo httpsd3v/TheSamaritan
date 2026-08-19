@@ -1056,21 +1056,35 @@ def api_voice_token():
         return err("Unknown voice room.")
     if not AccessToken or not LIVEKIT_URL or not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
         return err("Voice chat is not configured yet. Set LIVEKIT env vars.")
-    try:
+        try:
         token = AccessToken(
             LIVEKIT_API_KEY,
             LIVEKIT_API_SECRET,
             identity=session["user_id"],
             name=session.get("username", "user"),
         )
-        token.grants.room = room_id
-        token.grants.room_join = True
-        token.grants.can_publish = True
-        token.grants.can_subscribe = True
+        
+        # Try the newer SDK format first
+        try:
+            token.grants.room = room_id
+            token.grants.room_join = True
+            token.grants.can_publish = True
+            token.grants.can_subscribe = True
+        except AttributeError:
+            # Fallback for older/different SDK versions
+            from livekit.api import VideoGrants
+            token.grants.video = VideoGrants(
+                room=room_id,
+                room_join=True,
+                can_publish=True,
+                can_subscribe=True
+            )
+
         return ok(token=token.to_jwt(), url=LIVEKIT_URL, room=room_id)
     except Exception as e:
         app.logger.error(f"Voice token failed: {e}")
         return err("Could not create voice token.", 500)
+
 
 
 # --------------------------------------------------------------------------
