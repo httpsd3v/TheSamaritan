@@ -105,3 +105,9 @@ textarea.input { height:auto; min-height:96px; padding:10px 12px; resize:vertica
 .voice-room-sub { color:var(--muted); font-size:12px; }
 .active-room { border-color:var(--text); }
 @media (min-width:768px) { .app-container { max-width:680px; } }
+.voice-room-top { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.voice-count-badge { font-size:12px; color:var(--muted); border:1px solid var(--border); border-radius:999px; padding:4px 10px; white-space:nowrap; }
+.voice-avatars { display:flex; align-items:center; margin:10px 0 4px; }
+.voice-avatars .avatar-va { width:32px; height:32px; flex-basis:32px; margin-left:-8px; border:2px solid var(--surface); font-size:12px; }
+.voice-avatars .avatar-va:first-child { margin-left:0; }
+.voice-more { margin-left:8px; font-size:12px; color:var(--muted); }
