@@ -95,28 +95,13 @@ textarea.input { height:auto; min-height:96px; padding:10px 12px; resize:vertica
 .loading-spinner { display:flex; align-items:center; gap:8px; }
 .loading-spinner::before { content:""; width:16px; height:16px; border:2px solid var(--border); border-top-color:var(--text); border-radius:50%; animation:spin 0.8s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
+.voice-bar { position:fixed; bottom:72px; left:50%; transform:translateX(-50%); width:calc(100% - 24px); max-width:656px; display:flex; align-items:center; gap:10px; padding:6px 10px; border:1px solid var(--border); border-radius:999px; background:var(--surface-2); z-index:99; }
+.voice-bar-dot { width:8px; height:8px; border-radius:50%; background:var(--text); animation:vpulse 1.2s infinite; }
+@keyframes vpulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+.voice-bar-name { font-weight:700; font-size:13px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.voice-bar-count { font-size:12px; color:var(--muted); }
+.voice-room { display:flex; flex-direction:column; gap:6px; }
+.voice-room-name { font-weight:800; }
+.voice-room-sub { color:var(--muted); font-size:12px; }
+.active-room { border-color:var(--text); }
 @media (min-width:768px) { .app-container { max-width:680px; } }
-.voice-bar {
-    position: fixed;
-    bottom: 72px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: calc(100% - 24px);
-    max-width: 656px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 6px 10px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--surface-2);
-    z-index: 99;
-}
-.voice-bar-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text); animation: vpulse 1.2s infinite; }
-@keyframes vpulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
-.voice-bar-name { font-weight: 700; font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.voice-bar-count { font-size: 12px; color: var(--muted); }
-.voice-room { display: flex; flex-direction: column; gap: 6px; }
-.voice-room-name { font-weight: 800; }
-.voice-room-sub { color: var(--muted); font-size: 12px; }
-.active-room { border-color: var(--text); }
