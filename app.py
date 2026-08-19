@@ -7,7 +7,6 @@ import time
 import jwt
 from functools import wraps
 from datetime import datetime, timezone, timedelta
-import requests
 
 from flask import Flask, render_template, request, session, jsonify, send_from_directory
 
@@ -16,6 +15,11 @@ try:
     load_dotenv()
 except Exception:
     pass
+
+try:
+    import requests as _requests
+except ImportError:
+    _requests = None
 
 from supabase import create_client, Client
 
@@ -57,7 +61,7 @@ VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
 VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
 VAPID_CLAIMS_EMAIL = os.environ.get("VAPID_CLAIMS_EMAIL", "mailto:admin@samaritan.app")
 
-# Voice (LiveKit) - tokens generated with pure PyJWT for zero SDK errors
+# Voice (LiveKit) - tokens generated with pure PyJWT (zero SDK errors)
 LIVEKIT_URL = os.environ.get("LIVEKIT_URL", "")
 LIVEKIT_API_KEY = os.environ.get("LIVEKIT_API_KEY", "")
 LIVEKIT_API_SECRET = os.environ.get("LIVEKIT_API_SECRET", "")
@@ -390,6 +394,73 @@ def notify_user(user_id, title, body, url="/"):
             db.table("push_subscriptions").delete().eq("id", sid).execute()
     except Exception as e:
         app.logger.error(f"notify_user failed: {e}")
+
+
+# --------------------------------------------------------------------------
+# Voice helpers (LiveKit via Twirp + PyJWT)
+# --------------------------------------------------------------------------
+def livekit_api_base():
+    # Server-side API needs https, even if the env var was saved as wss
+    return LIVEKIT_URL.replace("wss://", "https://").replace("ws://", "http://").rstrip("/")
+
+
+def livekit_client_url():
+    # Browser client needs wss, even if the env var was saved as https
+    return LIVEKIT_URL.replace("https://", "wss://").replace("http://", "ws://").rstrip("/")
+
+
+def livekit_service_token(room_list=False):
+    now = int(time.time())
+    video = {"roomList": True, "roomAdmin": True} if room_list else {}
+    claims = {
+        "iss": LIVEKIT_API_KEY,
+        "sub": "",
+        "nbf": now,
+        "exp": now + 60,
+        "video": video,
+    }
+    token = jwt.encode(claims, LIVEKIT_API_SECRET, algorithm="HS256")
+    if isinstance(token, bytes):
+        token = token.decode("utf-8")
+    return token
+
+
+def get_livekit_rooms_state():
+    result = {}
+    if not LIVEKIT_URL or not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET or _requests is None:
+        return result
+    try:
+        base = livekit_api_base()
+        headers = {
+            "Authorization": "Bearer " + livekit_service_token(room_list=True),
+            "Content-Type": "application/json",
+        }
+        r = _requests.post(base + "/twirp/livekit.RoomService/ListRooms", headers=headers, json={}, timeout=3)
+        if r.status_code != 200:
+            return result
+        active = {room.get("name"): room for room in (r.json() or {}).get("rooms", [])}
+        for vr in VOICE_ROOMS:
+            rid = vr["id"]
+            info = active.get(rid)
+            if not info:
+                result[rid] = {"count": 0, "identities": []}
+                continue
+            identities = []
+            try:
+                pr = _requests.post(base + "/twirp/livekit.RoomService/ListParticipants", headers=headers, json={"room": rid}, timeout=3)
+                if pr.status_code == 200:
+                    for p in (pr.json() or {}).get("participants", []):
+                        identities.append({"identity": p.get("identity", ""), "name": p.get("name", "")})
+            except Exception:
+                pass
+            result[rid] = {
+                "count": len(identities) or int(info.get("numParticipants", 0)),
+                "identities": identities,
+            }
+        return result
+    except Exception as e:
+        app.logger.error(f"LiveKit room state failed: {e}")
+        return result
 
 
 # --------------------------------------------------------------------------
@@ -1033,119 +1104,36 @@ def api_mark_read():
 
 
 # --------------------------------------------------------------------------
-# Voice (LiveKit via pure PyJWT - lowest delay, zero SDK errors)
+# Voice routes (crash-proof)
 # --------------------------------------------------------------------------
-@app.route("/api/voice/rooms")
-@login_required_api
-# --------------------------------------------------------------------------
-# Voice room presence (LiveKit server API via Twirp + PyJWT)
-# --------------------------------------------------------------------------
-def livekit_service_token():
-    now = int(time.time())
-    claims = {
-        "iss": LIVEKIT_API_KEY,
-        "sub": "",
-        "nbf": now,
-        "exp": now + 60,
-        "video": {
-            "roomList": True,
-            "roomAdmin": True,
-        },
-    }
-    token = jwt.encode(claims, LIVEKIT_API_SECRET, algorithm="HS256")
-    if isinstance(token, bytes):
-        token = token.decode("utf-8")
-    return token
-
-
-def get_livekit_rooms_state():
-    result = {}
-    if not LIVEKIT_URL or not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
-        return result
-    try:
-        headers = {
-            "Authorization": f"Bearer {livekit_service_token()}",
-            "Content-Type": "application/json",
-        }
-        r = requests.post(
-            f"{LIVEKIT_URL}/twirp/livekit.RoomService/ListRooms",
-            headers=headers,
-            json={},
-            timeout=3,
-        )
-        if r.status_code != 200:
-            return result
-        active = {room.get("name"): room for room in r.json().get("rooms", [])}
-
-        for vr in VOICE_ROOMS:
-            rid = vr["id"]
-            info = active.get(rid)
-            if not info:
-                result[rid] = {"count": 0, "identities": []}
-                continue
-            identities = []
-            pr = requests.post(
-                f"{LIVEKIT_URL}/twirp/livekit.RoomService/ListParticipants",
-                headers=headers,
-                json={"room": rid},
-                timeout=3,
-            )
-            if pr.status_code == 200:
-                for p in pr.json().get("participants", []):
-                    identities.append({
-                        "identity": p.get("identity", ""),
-                        "name": p.get("name", ""),
-                    })
-            result[rid] = {
-                "count": len(identities) or int(info.get("numParticipants", 0)),
-                "identities": identities,
-            }
-        return result
-    except Exception as e:
-        app.logger.error(f"LiveKit room state failed: {e}")
-        return result
-
-
 @app.route("/api/voice/rooms")
 @login_required_api
 def api_voice_rooms():
-    states = get_livekit_rooms_state()
-
-    ids = []
-    for st in states.values():
-        for p in st.get("identities", []):
-            if p.get("identity"):
-                ids.append(p["identity"])
-
-    profiles = {}
-    if ids:
-        try:
-            rows = db.table("profiles").select("*").in_("id", ids).execute().data or []
-            profiles = {r["id"]: serialize_profile(r) for r in rows}
-        except Exception:
-            profiles = {}
-
     rooms = []
-    for vr in VOICE_ROOMS:
-        st = states.get(vr["id"], {"count": 0, "identities": []})
-        parts = []
-        for p in st.get("identities", []):
-            prof = profiles.get(p.get("identity"))
-            if prof:
-                parts.append(prof)
-            else:
-                parts.append({
+    try:
+        states = get_livekit_rooms_state()
+        ids = list({p.get("identity") for st in states.values() for p in st.get("identities", []) if p.get("identity")})
+        profiles = {}
+        if ids:
+            try:
+                rows = db.table("profiles").select("*").in_("id", ids).execute().data or []
+                profiles = {r["id"]: serialize_profile(r) for r in rows}
+            except Exception as e:
+                app.logger.error(f"voice profiles failed: {e}")
+        for vr in VOICE_ROOMS:
+            st = states.get(vr["id"], {"count": 0, "identities": []})
+            parts = []
+            for p in st.get("identities", []):
+                parts.append(profiles.get(p.get("identity")) or {
                     "id": p.get("identity"),
                     "username": p.get("name") or "user",
                     "verified": False,
                     "avatar_url": "",
                 })
-        rooms.append({
-            "id": vr["id"],
-            "name": vr["name"],
-            "count": st.get("count", 0),
-            "participants": parts,
-        })
+            rooms.append({"id": vr["id"], "name": vr["name"], "count": st.get("count", 0), "participants": parts})
+    except Exception as e:
+        app.logger.error(f"voice rooms failed: {e}")
+        rooms = [{"id": vr["id"], "name": vr["name"], "count": 0, "participants": []} for vr in VOICE_ROOMS]
     return ok(rooms=rooms)
 
 
@@ -1153,14 +1141,10 @@ def api_voice_rooms():
 @login_required_api
 def api_voice_token():
     room_id = (request.args.get("room") or "").strip()
-
-    valid_rooms = {r["id"] for r in VOICE_ROOMS}
-    if room_id not in valid_rooms:
-        return jsonify({"ok": False, "error": "Unknown voice room."}), 400
-
+    if room_id not in {r["id"] for r in VOICE_ROOMS}:
+        return err("Unknown voice room.", 400)
     if not LIVEKIT_URL or not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
-        return jsonify({"ok": False, "error": "Voice env vars missing in Render."}), 500
-
+        return err("Voice env vars missing in Render.", 500)
     try:
         now = int(time.time())
         claims = {
@@ -1169,20 +1153,15 @@ def api_voice_token():
             "name": session.get("username", "user"),
             "nbf": now,
             "exp": now + 600,
-            "video": {
-                "roomJoin": True,
-                "room": room_id,
-                "canPublish": True,
-                "canSubscribe": True,
-            },
+            "video": {"roomJoin": True, "room": room_id, "canPublish": True, "canSubscribe": True},
         }
         token = jwt.encode(claims, LIVEKIT_API_SECRET, algorithm="HS256")
         if isinstance(token, bytes):
             token = token.decode("utf-8")
-        return jsonify({"ok": True, "token": token, "url": LIVEKIT_URL, "room": room_id})
+        return ok(token=token, url=livekit_client_url(), room=room_id)
     except Exception as e:
         app.logger.error(f"Voice token failed: {e}")
-        return jsonify({"ok": False, "error": f"Token Error: {e}"}), 500
+        return err(f"Token Error: {e}", 500)
 
 
 # --------------------------------------------------------------------------
