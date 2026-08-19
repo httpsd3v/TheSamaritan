@@ -1057,28 +1057,28 @@ def api_voice_token():
     if not AccessToken or not LIVEKIT_URL or not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
         return err("Voice chat is not configured yet. Set LIVEKIT env vars.")
         try:
-        # Create the token (Notice the 4-space indent below 'try:')
-        token = AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-        token.identity = session["user_id"]
-        token.name = session.get("username", "user")
+            # Create the token (Notice the 4-space indent below 'try:')
+            token = AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
+            token.identity = session["user_id"]
+            token.name = session.get("username", "user")
+            
+            # Set permissions using the most compatible method
+            from livekit.api import VideoGrants
+            grants = VideoGrants(
+                room_join=True,
+                room=room_id,
+                can_publish=True,
+                can_subscribe=True
+            )
+            token.grants.video = grants
+            
+            jwt_token = token.to_jwt()
+            return ok(token=jwt_token, url=LIVEKIT_URL, room=room_id)
         
-        # Set permissions using the most compatible method
-        from livekit.api import VideoGrants
-        grants = VideoGrants(
-            room_join=True,
-            room=room_id,
-            can_publish=True,
-            can_subscribe=True
-        )
-        token.grants.video = grants
-        
-        jwt_token = token.to_jwt()
-        return ok(token=jwt_token, url=LIVEKIT_URL, room=room_id)
-        
-    except Exception as e:
-        # This will print the EXACT error to your Render logs
-        app.logger.error(f"Voice token failed: {str(e)}")
-        return err(f"Could not create voice token: {str(e)}", 500)
+        except Exception as e:
+            # This will print the EXACT error to your Render logs
+            app.logger.error(f"Voice token failed: {str(e)}")
+            return err(f"Could not create voice token: {str(e)}", 500)
 
 
 
