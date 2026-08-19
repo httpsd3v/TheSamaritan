@@ -5,6 +5,7 @@ import uuid
 import json
 import time
 import jwt
+import threading
 import urllib.request
 import urllib.error
 from functools import wraps
@@ -389,6 +390,56 @@ def notify_user(user_id, title, body, url="/"):
         app.logger.error(f"notify_user failed: {e}")
 
 
+def broadcast_event(type_, actor_id, title, body, post_id=None, url="/"):
+    """Send an in-app notification + web push to EVERY account except the actor.
+    Runs in a background thread so posting/creating stays instant."""
+    def _run():
+        try:
+            client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+            # 1. In-app bell notifications for everyone else
+            try:
+                profs = client.table("profiles").select("id").neq("id", actor_id).limit(500).execute().data or []
+                rows = [{
+                    "user_id": p["id"],
+                    "actor_id": actor_id,
+                    "type": type_,
+                    "post_id": post_id,
+                    "read": False,
+                } for p in profs if p.get("id")]
+                if rows:
+                    client.table("notifications").insert(rows).execute()
+            except Exception as e:
+                app.logger.error(f"broadcast in-app failed: {e}")
+
+            # 2. Web push to every other device
+            if VAPID_PRIVATE_KEY and webpush:
+                try:
+                    subs = client.table("push_subscriptions").select("*").neq("user_id", actor_id).limit(500).execute().data or []
+                    payload = json.dumps({"title": title, "body": body, "url": url})
+                    dead = []
+                    for s in subs:
+                        try:
+                            webpush(
+                                {"endpoint": s["endpoint"], "keys": {"p256dh": s["p256dh"], "auth": s["auth"]}},
+                                data=payload,
+                                vapid_private_key=VAPID_PRIVATE_KEY,
+                                vapid_claims={"sub": VAPID_CLAIMS_EMAIL},
+                            )
+                        except WebPushException as e2:
+                            st = getattr(getattr(e2, "response", None), "status_code", None)
+                            if st in (400, 401, 403, 404, 410):
+                                dead.append(s.get("id"))
+                    for sid in dead:
+                        client.table("push_subscriptions").delete().eq("id", sid).execute()
+                except Exception as e:
+                    app.logger.error(f"broadcast push failed: {e}")
+        except Exception as e:
+            app.logger.error(f"broadcast_event failed: {e}")
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 # --------------------------------------------------------------------------
 # Voice helpers (LiveKit Twirp + PyJWT, bulletproof HTTP)
 # --------------------------------------------------------------------------
@@ -627,6 +678,12 @@ def api_create_post():
         }).execute()
         post = r.data[0] if r.data else db.table("posts").select("*").eq("user_id", session["user_id"]).order("created_at", desc=True).limit(1).execute().data[0]
         post["profiles"] = get_profile(session["user_id"])
+
+        # NEW: notify every other account (push + in-app bell)
+        actor = session.get("username", "user")
+        body = content[:100] if content else "📸 New photo posted"
+        broadcast_event("post", session["user_id"], f"@{actor} posted", body, post_id=post.get("id"))
+
         return ok(post=serialize_post(post, set(), {post.get("id"): 0}, {post.get("id"): 0}))
     except Exception as e:
         app.logger.error(f"Create post failed: {e}")
@@ -1179,6 +1236,11 @@ def api_voice_create():
             "name": name,
             "created_by": session["user_id"],
         }).execute()
+
+        # NEW: notify every other account (push + in-app bell)
+        actor = session.get("username", "user")
+        broadcast_event("voice", session["user_id"], f"@{actor} started a voice room", f"🔊 \"{name}\" — tap to join")
+
         return ok(room={"id": rid, "name": name})
     except Exception as e:
         app.logger.error(f"voice create failed: {e}")
