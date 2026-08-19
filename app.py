@@ -1036,8 +1036,116 @@ def api_mark_read():
 # --------------------------------------------------------------------------
 @app.route("/api/voice/rooms")
 @login_required_api
+# --------------------------------------------------------------------------
+# Voice room presence (LiveKit server API via Twirp + PyJWT)
+# --------------------------------------------------------------------------
+def livekit_service_token():
+    now = int(time.time())
+    claims = {
+        "iss": LIVEKIT_API_KEY,
+        "sub": "",
+        "nbf": now,
+        "exp": now + 60,
+        "video": {
+            "roomList": True,
+            "roomAdmin": True,
+        },
+    }
+    token = jwt.encode(claims, LIVEKIT_API_SECRET, algorithm="HS256")
+    if isinstance(token, bytes):
+        token = token.decode("utf-8")
+    return token
+
+
+def get_livekit_rooms_state():
+    result = {}
+    if not LIVEKIT_URL or not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
+        return result
+    try:
+        headers = {
+            "Authorization": f"Bearer {livekit_service_token()}",
+            "Content-Type": "application/json",
+        }
+        r = requests.post(
+            f"{LIVEKIT_URL}/twirp/livekit.RoomService/ListRooms",
+            headers=headers,
+            json={},
+            timeout=3,
+        )
+        if r.status_code != 200:
+            return result
+        active = {room.get("name"): room for room in r.json().get("rooms", [])}
+
+        for vr in VOICE_ROOMS:
+            rid = vr["id"]
+            info = active.get(rid)
+            if not info:
+                result[rid] = {"count": 0, "identities": []}
+                continue
+            identities = []
+            pr = requests.post(
+                f"{LIVEKIT_URL}/twirp/livekit.RoomService/ListParticipants",
+                headers=headers,
+                json={"room": rid},
+                timeout=3,
+            )
+            if pr.status_code == 200:
+                for p in pr.json().get("participants", []):
+                    identities.append({
+                        "identity": p.get("identity", ""),
+                        "name": p.get("name", ""),
+                    })
+            result[rid] = {
+                "count": len(identities) or int(info.get("numParticipants", 0)),
+                "identities": identities,
+            }
+        return result
+    except Exception as e:
+        app.logger.error(f"LiveKit room state failed: {e}")
+        return result
+
+
+@app.route("/api/voice/rooms")
+@login_required_api
 def api_voice_rooms():
-    return ok(rooms=VOICE_ROOMS)
+    states = get_livekit_rooms_state()
+
+    ids = []
+    for st in states.values():
+        for p in st.get("identities", []):
+            if p.get("identity"):
+                ids.append(p["identity"])
+
+    profiles = {}
+    if ids:
+        try:
+            rows = db.table("profiles").select("*").in_("id", ids).execute().data or []
+            profiles = {r["id"]: serialize_profile(r) for r in rows}
+        except Exception:
+            profiles = {}
+
+    rooms = []
+    for vr in VOICE_ROOMS:
+        st = states.get(vr["id"], {"count": 0, "identities": []})
+        parts = []
+        for p in st.get("identities", []):
+            prof = profiles.get(p.get("identity"))
+            if prof:
+                parts.append(prof)
+            else:
+                parts.append({
+                    "id": p.get("identity"),
+                    "username": p.get("name") or "user",
+                    "verified": False,
+                    "avatar_url": "",
+                })
+        rooms.append({
+            "id": vr["id"],
+            "name": vr["name"],
+            "count": st.get("count", 0),
+            "participants": parts,
+        })
+    return ok(rooms=rooms)
 
 
 @app.route("/api/voice/token")
