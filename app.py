@@ -1047,39 +1047,48 @@ def api_mark_read():
 def api_voice_rooms():
     return ok(rooms=VOICE_ROOMS)
 
-
 @app.route("/api/voice/token")
 @login_required_api
 def api_voice_token():
     room_id = (request.args.get("room") or "").strip()
-    if room_id not in {r["id"] for r in VOICE_ROOMS}:
-        return err("Unknown voice room.")
-    if not AccessToken or not LIVEKIT_URL or not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
-        return err("Voice chat is not configured yet. Set LIVEKIT env vars.")
-        try:
-            # Create the token (Notice the 4-space indent below 'try:')
-            token = AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-            token.identity = session["user_id"]
-            token.name = session.get("username", "user")
-            
-            # Set permissions using the most compatible method
-            from livekit.api import VideoGrants
-            grants = VideoGrants(
-                room_join=True,
-                room=room_id,
-                can_publish=True,
-                can_subscribe=True
-            )
-            token.grants.video = grants
-            
-            jwt_token = token.to_jwt()
-            return ok(token=jwt_token, url=LIVEKIT_URL, room=room_id)
-        
-        except Exception as e:
-            # This will print the EXACT error to your Render logs
-            app.logger.error(f"Voice token failed: {str(e)}")
-            return err(f"Could not create voice token: {str(e)}", 500)
+    
+    # 1. Check if room is valid
+    valid_rooms = {r["id"] for r in VOICE_ROOMS}
+    if room_id not in valid_rooms:
+        return err("Unknown voice room.", 400)
+    
+    # 2. Check if environment variables are set
+    if not LIVEKIT_URL or not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
+        app.logger.error("Voice env vars missing!")
+        return err("Voice chat is not configured yet. Check Render env vars.", 500)
 
+    # 3. Check if the livekit-api module installed correctly
+    if not AccessToken:
+        app.logger.error("livekit-api module not found!")
+        return err("Voice module not installed. Check requirements.txt.", 500)
+
+    # 4. Try to generate the token
+    try:
+        token = AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
+        token.identity = session["user_id"]
+        token.name = session.get("username", "user")
+        
+        # Set permissions (compatible with all livekit-api versions)
+        token.grants.room_join = True
+        token.grants.room = room_id
+        token.grants.can_publish = True
+        token.grants.can_subscribe = True
+        
+        jwt_token = token.to_jwt()
+        
+        # Success! Return the token and URL
+        return ok(token=jwt_token, url=LIVEKIT_URL, room=room_id)
+        
+    except Exception as e:
+        # If LiveKit throws an error (like invalid API key), catch it and return it
+        error_msg = str(e)
+        app.logger.error(f"Voice token failed: {error_msg}")
+        return err(f"Voice Error: {error_msg}", 500)
 
 
 # --------------------------------------------------------------------------
