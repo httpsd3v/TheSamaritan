@@ -1052,39 +1052,59 @@ def api_voice_rooms():
 def api_voice_token():
     room_id = (request.args.get("room") or "").strip()
     
-    # 1. Check if room is valid
     valid_rooms = {r["id"] for r in VOICE_ROOMS}
     if room_id not in valid_rooms:
         return jsonify({"ok": False, "error": "Unknown voice room."}), 400
     
-    # 2. Check if environment variables are set
     if not LIVEKIT_URL or not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
         return jsonify({"ok": False, "error": "Voice env vars missing in Render."}), 500
 
-    # 3. Check if the livekit-api module installed correctly
     if not AccessToken:
         return jsonify({"ok": False, "error": "livekit-api not in requirements.txt"}), 500
 
-    # 4. Try to generate the token
     try:
-        token = AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-        token.identity = session["user_id"]
-        token.name = session.get("username", "user")
-        
-        # Set permissions
-        token.grants.room_join = True
-        token.grants.room = room_id
-        token.grants.can_publish = True
-        token.grants.can_subscribe = True
-        
+        # Try the NEWER API format first (livekit-api >= 1.0)
+        try:
+            from livekit.api import VideoGrants
+            
+            token = AccessToken(
+                api_key=LIVEKIT_API_KEY,
+                api_secret=LIVEKIT_API_SECRET,
+                identity=session["user_id"],
+                name=session.get("username", "user"),
+            )
+            
+            # In newer versions, grants are passed directly or via .grants.video
+            if hasattr(token, 'grants') and hasattr(token.grants, 'video'):
+                token.grants.video.room_join = True
+                token.grants.video.room = room_id
+                token.grants.video.can_publish = True
+                token.grants.video.can_subscribe = True
+            else:
+                # Fallback: try setting grants directly
+                token.grants = VideoGrants(
+                    room_join=True,
+                    room=room_id,
+                    can_publish=True,
+                    can_subscribe=True
+                )
+                
+        except (ImportError, AttributeError, TypeError):
+            # Try the OLDER API format (livekit-api < 1.0)
+            token = AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
+            token.identity = session["user_id"]
+            token.name = session.get("username", "user")
+            
+            # In older versions, you add claims directly
+            token.add_grant(room_join=True, room=room_id, can_publish=True, can_subscribe=True)
+
         jwt_token = token.to_jwt()
-        
-        # Success!
         return jsonify({"ok": True, "token": jwt_token, "url": LIVEKIT_URL, "room": room_id})
         
     except Exception as e:
-        # Return the exact LiveKit error
-        return jsonify({"ok": False, "error": f"LiveKit Error: {str(e)}"}), 500
+        error_msg = str(e)
+        app.logger.error(f"Voice token failed: {error_msg}")
+        return jsonify({"ok": False, "error": f"LiveKit Error: {error_msg}"}), 500
 
 
 # --------------------------------------------------------------------------
