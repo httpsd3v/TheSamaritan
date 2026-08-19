@@ -3,6 +3,8 @@ import re
 import io
 import uuid
 import json
+import time
+import jwt
 from functools import wraps
 from datetime import datetime, timezone, timedelta
 
@@ -54,10 +56,7 @@ VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
 VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
 VAPID_CLAIMS_EMAIL = os.environ.get("VAPID_CLAIMS_EMAIL", "mailto:admin@samaritan.app")
 
-
-# --------------------------------------------------------------------------
-# Voice chat (LiveKit)
-# --------------------------------------------------------------------------
+# Voice (LiveKit) - tokens generated with pure PyJWT for zero SDK errors
 LIVEKIT_URL = os.environ.get("LIVEKIT_URL", "")
 LIVEKIT_API_KEY = os.environ.get("LIVEKIT_API_KEY", "")
 LIVEKIT_API_SECRET = os.environ.get("LIVEKIT_API_SECRET", "")
@@ -70,11 +69,7 @@ VOICE_ROOMS = [
     {"id": "latenight", "name": "Late Night"},
 ]
 
-try:
-    from livekit.api import AccessToken
-except ImportError:
-    AccessToken = None
-    
+
 def normalize_username(raw):
     return (raw or "").strip().lower()
 
@@ -432,8 +427,6 @@ def api_signin():
     u, pw = normalize_username(d.get("username", "")), d.get("password", "")
     if not u or not pw:
         return err("Username and password are required.")
-
-    # Ban check before allowing login
     try:
         r = db.table("profiles").select("*").eq("username", u).limit(1).execute()
         prof = r.data[0] if r.data else None
@@ -443,7 +436,6 @@ def api_signin():
         rem = get_ban_remaining(prof)
         if rem is not None:
             return err(ban_message(rem), 403)
-
     try:
         authenticate(u, pw)
     except Exception as e:
@@ -511,16 +503,13 @@ def api_feed():
     except Exception:
         limit = 30
     cursor = request.args.get("cursor")
-
     blocked_ids = get_blocked_ids(session["user_id"])
-
     try:
         q = db.table("posts").select("*, profiles(*)").order("created_at", desc=True).limit(limit)
         if cursor:
             q = q.lt("created_at", cursor)
         if blocked_ids:
             q = q.not_.in_("user_id", blocked_ids)
-
         posts = q.execute().data or []
         return ok(posts=hydrate_posts(posts), has_more=len(posts) == limit)
     except Exception as e:
@@ -1042,69 +1031,49 @@ def api_mark_read():
         return err("Could not mark.", 500)
 
 
+# --------------------------------------------------------------------------
+# Voice (LiveKit via pure PyJWT - lowest delay, zero SDK errors)
+# --------------------------------------------------------------------------
 @app.route("/api/voice/rooms")
 @login_required_api
 def api_voice_rooms():
     return ok(rooms=VOICE_ROOMS)
 
+
 @app.route("/api/voice/token")
 @login_required_api
 def api_voice_token():
     room_id = (request.args.get("room") or "").strip()
-    
+
     valid_rooms = {r["id"] for r in VOICE_ROOMS}
     if room_id not in valid_rooms:
         return jsonify({"ok": False, "error": "Unknown voice room."}), 400
-    
+
     if not LIVEKIT_URL or not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
         return jsonify({"ok": False, "error": "Voice env vars missing in Render."}), 500
 
-    if not AccessToken:
-        return jsonify({"ok": False, "error": "livekit-api not in requirements.txt"}), 500
-
     try:
-        # Try the NEWER API format first (livekit-api >= 1.0)
-        try:
-            from livekit.api import VideoGrants
-            
-            token = AccessToken(
-                api_key=LIVEKIT_API_KEY,
-                api_secret=LIVEKIT_API_SECRET,
-                identity=session["user_id"],
-                name=session.get("username", "user"),
-            )
-            
-            # In newer versions, grants are passed directly or via .grants.video
-            if hasattr(token, 'grants') and hasattr(token.grants, 'video'):
-                token.grants.video.room_join = True
-                token.grants.video.room = room_id
-                token.grants.video.can_publish = True
-                token.grants.video.can_subscribe = True
-            else:
-                # Fallback: try setting grants directly
-                token.grants = VideoGrants(
-                    room_join=True,
-                    room=room_id,
-                    can_publish=True,
-                    can_subscribe=True
-                )
-                
-        except (ImportError, AttributeError, TypeError):
-            # Try the OLDER API format (livekit-api < 1.0)
-            token = AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-            token.identity = session["user_id"]
-            token.name = session.get("username", "user")
-            
-            # In older versions, you add claims directly
-            token.add_grant(room_join=True, room=room_id, can_publish=True, can_subscribe=True)
-
-        jwt_token = token.to_jwt()
-        return jsonify({"ok": True, "token": jwt_token, "url": LIVEKIT_URL, "room": room_id})
-        
+        now = int(time.time())
+        claims = {
+            "iss": LIVEKIT_API_KEY,
+            "sub": session["user_id"],
+            "name": session.get("username", "user"),
+            "nbf": now,
+            "exp": now + 600,
+            "video": {
+                "roomJoin": True,
+                "room": room_id,
+                "canPublish": True,
+                "canSubscribe": True,
+            },
+        }
+        token = jwt.encode(claims, LIVEKIT_API_SECRET, algorithm="HS256")
+        if isinstance(token, bytes):
+            token = token.decode("utf-8")
+        return jsonify({"ok": True, "token": token, "url": LIVEKIT_URL, "room": room_id})
     except Exception as e:
-        error_msg = str(e)
-        app.logger.error(f"Voice token failed: {error_msg}")
-        return jsonify({"ok": False, "error": f"LiveKit Error: {error_msg}"}), 500
+        app.logger.error(f"Voice token failed: {e}")
+        return jsonify({"ok": False, "error": f"Token Error: {e}"}), 500
 
 
 # --------------------------------------------------------------------------
