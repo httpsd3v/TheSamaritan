@@ -402,21 +402,43 @@
         async function showVoice() {
             state.view = "voice";
             setApp(shell(`<div class="feed"><div class="section-title">Voice rooms</div><div id="voice-rooms">Loading...</div><div class="empty" style="font-size:12px">Each room is a separate conversation. Only people in the same room can hear each other.</div></div>`, "", "Voice", true));
+            await loadVoiceRooms();
+            startVoiceRefresh();
+        }
+        
+        async function loadVoiceRooms() {
+            if (state.view !== "voice") return;
             try {
                 const d = await api("/api/voice/rooms");
-                document.getElementById("voice-rooms").innerHTML = d.rooms.map(r => `
+                const el = document.getElementById("voice-rooms");
+                if (!el) return;
+                el.innerHTML = d.rooms.map(r => `
                     <div class="post voice-room ${voice.roomId === r.id ? "active-room" : ""}">
-                        <div class="voice-room-name">${esc(r.name)}</div>
-                        <div class="voice-room-sub">${voice.roomId === r.id ? "You are in this room" : "Separate conversation"}</div>
+                        <div class="voice-room-top">
+                            <div>
+                                <div class="voice-room-name">${esc(r.name)}</div>
+                                <div class="voice-room-sub">${r.count > 0 ? (r.count === 1 ? "1 person talking" : r.count + " people talking") : "Empty — start the conversation"}</div>
+                            </div>
+                            <span class="voice-count-badge">🎧 ${r.count}</span>
+                        </div>
+                        ${r.participants.length ? `<div class="voice-avatars">${r.participants.slice(0, 6).map(p => av(p, "avatar avatar-va")).join("")}${r.participants.length > 6 ? `<span class="voice-more">+${r.participants.length - 6}</span>` : ""}</div>` : ""}
                         ${voice.roomId === r.id
                             ? `<button class="primary-button" data-action="voice-leave">Leave room</button>`
                             : `<button class="follow-button" data-join-voice="${esc(r.id)}" data-room-name="${esc(r.name)}">${voice.room ? "Switch room" : "Join"}</button>`}
                     </div>`).join("");
             } catch (e) {
-                toast(e.message);
-                const r = document.getElementById("voice-rooms");
-                if (r) r.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+                const el = document.getElementById("voice-rooms");
+                if (el) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
             }
+        }
+        
+        let voiceRefreshTimer = null;
+        function startVoiceRefresh() {
+            stopVoiceRefresh();
+            voiceRefreshTimer = setInterval(() => { if (state.view === "voice") loadVoiceRooms(); }, 10000);
+        }
+        function stopVoiceRefresh() {
+            if (voiceRefreshTimer) { clearInterval(voiceRefreshTimer); voiceRefreshTimer = null; }
         }
 
         async function joinVoice(roomId, roomName) {
