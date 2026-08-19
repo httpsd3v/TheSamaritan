@@ -374,7 +374,16 @@
                 state.unreadCount = 0; updateBadge();
             } catch (e) { toast(e.message); }
         }
-        function notifHTML(n) { let t = "interacted"; if (n.type === "reply") t = "replied"; else if (n.type === "like") t = "liked"; else if (n.type === "follow") t = "followed you"; return `<div class="post notif-item ${n.read ? "" : "unread"}" data-action="open-feed"><div class="post-header" style="margin-bottom:0">${av(n.actor)}<div class="author"><div class="author-name"><button class="link" data-open-profile="${esc(n.actor.username)}">${esc(n.actor.username)}</button>${vBadge(n.actor.verified)}</div><div class="timestamp">${ago(n.created_at)} · ${t}</div></div></div></div>`; }
+        
+        function notifHTML(n) {
+            let t = "interacted";
+            if (n.type === "reply") t = "replied";
+            else if (n.type === "like") t = "liked";
+            else if (n.type === "follow") t = "followed you";
+            else if (n.type === "post") t = "posted";
+            else if (n.type === "voice") t = "started a voice room";
+            return `<div class="post notif-item ${n.read ? "" : "unread"}" data-action="open-feed"><div class="post-header" style="margin-bottom:0">${av(n.actor)}<div class="author"><div class="author-name"><button class="link" data-open-profile="${esc(n.actor.username)}">${esc(n.actor.username)}</button>${vBadge(n.actor.verified)}</div><div class="timestamp">${ago(n.created_at)} · ${t}</div></div></div></div>`;
+        }
 
         // ------------------------------------------------------------------
         // Voice chat (Discord-style, user-created rooms)
