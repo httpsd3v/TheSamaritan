@@ -1055,17 +1055,15 @@ def api_voice_token():
     # 1. Check if room is valid
     valid_rooms = {r["id"] for r in VOICE_ROOMS}
     if room_id not in valid_rooms:
-        return err("Unknown voice room.", 400)
+        return jsonify({"ok": False, "error": "Unknown voice room."}), 400
     
     # 2. Check if environment variables are set
     if not LIVEKIT_URL or not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
-        app.logger.error("Voice env vars missing!")
-        return err("Voice chat is not configured yet. Check Render env vars.", 500)
+        return jsonify({"ok": False, "error": "Voice env vars missing in Render."}), 500
 
     # 3. Check if the livekit-api module installed correctly
     if not AccessToken:
-        app.logger.error("livekit-api module not found!")
-        return err("Voice module not installed. Check requirements.txt.", 500)
+        return jsonify({"ok": False, "error": "livekit-api not in requirements.txt"}), 500
 
     # 4. Try to generate the token
     try:
@@ -1073,7 +1071,7 @@ def api_voice_token():
         token.identity = session["user_id"]
         token.name = session.get("username", "user")
         
-        # Set permissions (compatible with all livekit-api versions)
+        # Set permissions
         token.grants.room_join = True
         token.grants.room = room_id
         token.grants.can_publish = True
@@ -1081,14 +1079,12 @@ def api_voice_token():
         
         jwt_token = token.to_jwt()
         
-        # Success! Return the token and URL
-        return ok(token=jwt_token, url=LIVEKIT_URL, room=room_id)
+        # Success!
+        return jsonify({"ok": True, "token": jwt_token, "url": LIVEKIT_URL, "room": room_id})
         
     except Exception as e:
-        # If LiveKit throws an error (like invalid API key), catch it and return it
-        error_msg = str(e)
-        app.logger.error(f"Voice token failed: {error_msg}")
-        return err(f"Voice Error: {error_msg}", 500)
+        # Return the exact LiveKit error
+        return jsonify({"ok": False, "error": f"LiveKit Error: {str(e)}"}), 500
 
 
 # --------------------------------------------------------------------------
