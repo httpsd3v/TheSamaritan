@@ -1057,33 +1057,28 @@ def api_voice_token():
     if not AccessToken or not LIVEKIT_URL or not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
         return err("Voice chat is not configured yet. Set LIVEKIT env vars.")
         try:
-        token = AccessToken(
-            LIVEKIT_API_KEY,
-            LIVEKIT_API_SECRET,
-            identity=session["user_id"],
-            name=session.get("username", "user"),
-        )
+        # Create the token (Notice the 4-space indent below 'try:')
+        token = AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
+        token.identity = session["user_id"]
+        token.name = session.get("username", "user")
         
-        # Try the newer SDK format first
-        try:
-            token.grants.room = room_id
-            token.grants.room_join = True
-            token.grants.can_publish = True
-            token.grants.can_subscribe = True
-        except AttributeError:
-            # Fallback for older/different SDK versions
-            from livekit.api import VideoGrants
-            token.grants.video = VideoGrants(
-                room=room_id,
-                room_join=True,
-                can_publish=True,
-                can_subscribe=True
-            )
-
-        return ok(token=token.to_jwt(), url=LIVEKIT_URL, room=room_id)
+        # Set permissions using the most compatible method
+        from livekit.api import VideoGrants
+        grants = VideoGrants(
+            room_join=True,
+            room=room_id,
+            can_publish=True,
+            can_subscribe=True
+        )
+        token.grants.video = grants
+        
+        jwt_token = token.to_jwt()
+        return ok(token=jwt_token, url=LIVEKIT_URL, room=room_id)
+        
     except Exception as e:
-        app.logger.error(f"Voice token failed: {e}")
-        return err("Could not create voice token.", 500)
+        # This will print the EXACT error to your Render logs
+        app.logger.error(f"Voice token failed: {str(e)}")
+        return err(f"Could not create voice token: {str(e)}", 500)
 
 
 
