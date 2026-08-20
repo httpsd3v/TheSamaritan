@@ -1329,6 +1329,9 @@ def favicon():
 def health():
     return "ok", 200
 
+@app.route("/google48835a82e1c0bacf.html")
+def google_site_verification():
+    return "google-site-verification: google48835a82e1c0bacf.html", 200
 
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
