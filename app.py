@@ -1329,9 +1329,25 @@ def favicon():
 def health():
     return "ok", 200
 
-@app.route("/google48835a82e1c0bacf.html")
-def google_site_verification():
-    return "google-site-verification: google48835a82e1c0bacf.html", 200
+
+@app.route("/robots.txt")
+def robots():
+    txt = "User-agent: *\nAllow: /\n\nSitemap: https://thesamaritan.onrender.com/sitemap.xml"
+    return txt, 200, {"Content-Type": "text/plain"}
+
+
+@app.route("/sitemap.xml")
+def sitemap():
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://thesamaritan.onrender.com/</loc>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>"""
+    return xml, 200, {"Content-Type": "application/xml"}
+
 
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
